@@ -6,6 +6,8 @@
     "agents/*"
   ],
   "scripts": {
+    "meet": "scripts/meet.sh",
+    "stop": "scripts/stop.sh",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }

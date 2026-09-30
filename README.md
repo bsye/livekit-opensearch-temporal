@@ -94,10 +94,13 @@ Measured on an M5 Max:
 | STT | `parakeet-tdt-0.6b-v2` (whisper-large-v3-turbo: ~720ms, multilingual) | ~60–110ms |
 | LLM first token | `gemma-4-26b-a4b`, `reasoning_effort: none` | ~530–620ms |
 | TTS first audio | `Kokoro-82M-8bit` (bf16: ~390ms) | ~200ms |
-| Voice-to-voice | `turn_latency` metric | ~1.5s |
+| Voice-to-voice | `turn_latency` metric | ~2–2.7s |
 
-Turn-taking is tuned in `agents/voice-agent/src/agent.ts` (`VAD_SILENCE_MS`,
-`ENDPOINTING_MIN_DELAY_MS`, preemptive LLM + TTS on the final transcript).
+Turn-taking is tuned in `agents/voice-agent/src/agent.ts`: 400ms VAD silence + 300ms
+endpointing delay, barge-in needs 600ms and 2+ words, and the LLM (not TTS) starts
+preemptively on the final transcript. Tighter settings split sentences at natural pauses
+and let "okay" or echo interrupt the agent, which then restarts its reply. Use headphones:
+on laptop speakers the mic picks up the agent's own voice.
 
 One-time setup and run:
 

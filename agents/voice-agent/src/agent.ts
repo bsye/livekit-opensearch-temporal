@@ -25,10 +25,14 @@ Keep replies short and conversational: one or two sentences, no markdown, lists 
 const LOCAL_API_KEY = 'local';
 
 // Turn-taking latency budget. The user's turn ends after VAD_SILENCE_MS of silence plus
-// ENDPOINTING_MIN_DELAY_MS; lower values answer faster but cut in on mid-sentence pauses.
-// SDK defaults are 550ms + 500ms.
-const VAD_SILENCE_MS = 300;
-const ENDPOINTING_MIN_DELAY_MS = 150;
+// ENDPOINTING_MIN_DELAY_MS (SDK defaults: 550ms + 500ms). At 300ms + 150ms, normal pauses
+// ("There is a… agent orchestration") split one sentence into two turns and two replies.
+const VAD_SILENCE_MS = 400;
+const ENDPOINTING_MIN_DELAY_MS = 300;
+// Barge-in: only real speech interrupts the agent, not "okay"/"mm-hm" or a blip of echo.
+// (The SDK's adaptive backchannel detector is a LiveKit Cloud model, so it isn't available.)
+const INTERRUPTION_MIN_MS = 600;
+const INTERRUPTION_MIN_WORDS = 2;
 
 export default defineAgent({
   prewarm: async (proc: JobProcess) => {
@@ -63,8 +67,10 @@ export default defineAgent({
         // plain VAD endpointing: the default turn-detector model is a LiveKit Cloud/extra-inference step
         turnDetection: 'vad',
         endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS },
-        // start the LLM *and* TTS on the final transcript, before the turn is confirmed
-        preemptiveGeneration: { enabled: true, preemptiveTts: true },
+        interruption: { mode: 'vad', minDuration: INTERRUPTION_MIN_MS, minWords: INTERRUPTION_MIN_WORDS },
+        // start the LLM on the final transcript before the turn is confirmed; TTS waits for the
+        // confirmed turn, otherwise discarded drafts get spoken and replies sound repeated
+        preemptiveGeneration: { enabled: true, preemptiveTts: false },
       },
     });
 

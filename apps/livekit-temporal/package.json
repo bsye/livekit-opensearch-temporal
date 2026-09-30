@@ -1,0 +1,23 @@
+{
+  "name": "livekit-temporal",
+  "private": true,
+  "type": "module",
+  "description": "Translates LiveKit webhooks into Temporal RoomSession workflows",
+  "scripts": {
+    "translator": "node --env-file=../../.env --import tsx src/translator.ts",
+    "worker": "node --env-file=../../.env --import tsx src/worker.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@temporalio/client": "^1.24.0",
+    "@temporalio/common": "^1.24.0",
+    "@temporalio/worker": "^1.24.0",
+    "@temporalio/workflow": "^1.24.0",
+    "livekit-server-sdk": "^2.19.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

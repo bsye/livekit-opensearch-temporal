@@ -1,0 +1,105 @@
+# Requires host networking: Linux, or OrbStack on macOS (Docker Desktop does not forward it the same way)
+services:
+  caddy:
+    image: livekit/caddyl4
+    command: run --config /etc/caddy.yaml --adapter yaml
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./infra/caddy/caddy.yaml:/etc/caddy.yaml
+      - ./data/caddy:/data
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./infra/livekit/livekit.yaml:/etc/livekit.yaml
+  redis:
+    image: redis:7-alpine
+    command: redis-server /etc/redis.conf
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./infra/redis/redis.conf:/etc/redis.conf
+  egress:
+    image: livekit/egress:latest
+    restart: unless-stopped
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+    network_mode: "host"
+    volumes:
+      - ./infra/egress/egress.yaml:/etc/egress.yaml
+    cap_add:
+      - CAP_SYS_ADMIN
+  ingress:
+    image: livekit/ingress:latest
+    restart: unless-stopped
+    environment:
+      - INGRESS_CONFIG_FILE=/etc/ingress.yaml
+    network_mode: "host"
+    volumes:
+      - ./infra/ingress/ingress.yaml:/etc/ingress.yaml
+
+  # --- Temporal (bridge network; reached from the host network on localhost:7233) ---
+  temporal-postgresql:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    volumes:
+      - temporal-postgres:/var/lib/postgresql/data
+
+  temporal-schema: # one-shot: creates/upgrades the databases, then exits
+    image: temporalio/admin-tools:1.31.3
+    entrypoint: ["sh", "/setup.sh", "schema"]
+    environment: &temporal-db
+      POSTGRES_SEEDS: temporal-postgresql
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+    volumes:
+      - ./infra/temporal/setup.sh:/setup.sh:ro
+    depends_on:
+      - temporal-postgresql
+  
+  temporal:
+    image: temporalio/server:1.31.3
+    restart: unless-stopped
+    environment:
+      <<: *temporal-db
+      DB: postgres12
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal/config/config.yaml
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/config/dynamicconfig.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./infra/temporal/config.yaml:/etc/temporal/config/config.yaml:ro
+      - ./infra/temporal/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig.yaml:ro
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+
+  temporal-namespace: # one-shot: namespace + search attributes, then exits
+    image: temporalio/admin-tools:1.31.3
+    entrypoint: ["sh", "/setup.sh", "namespace"]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+    volumes:
+      - ./infra/temporal/setup.sh:/setup.sh:ro
+    depends_on:
+      - temporal
+
+  temporal-ui:
+    image: temporalio/ui:2.54.1
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8233:8080" # 8080 on the host is taken by ingress (WHIP)
+    depends_on:
+      - temporal
+
+volumes:
+  temporal-postgres:

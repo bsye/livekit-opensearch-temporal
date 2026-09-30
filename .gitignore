@@ -1,0 +1,25 @@
+# secrets (template: .env.example)
+.env
+.env.local
+
+# runtime data; data/caddy holds the local CA private keys this Mac trusts
+data/
+caddy_data/
+
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# python (agents)
+__pycache__/
+.venv/
+
+# models downloaded for local STT/LLM/TTS
+models/
+
+# os / editors / logs
+.DS_Store
+.idea/
+.vscode/
+*.log

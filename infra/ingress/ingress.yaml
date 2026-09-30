@@ -1,0 +1,14 @@
+redis:
+    address: localhost:6379
+api_key: devkey
+api_secret: secret
+ws_url: wss://livekit.localhost
+rtmp_port: 1935
+whip_port: 8080
+http_relay_port: 9090
+logging: {}
+development: false
+rtc_config:
+    udp_port: 7885
+    use_external_ip: false
+    enable_loopback_candidate: false

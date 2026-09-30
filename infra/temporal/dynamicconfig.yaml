@@ -1,0 +1,7 @@
+# Temporal dynamic config (hot-reloaded every 60s). Dev values from temporalio/docker-compose.
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true # dev only: makes newly created search attributes usable immediately
+    constraints: {}

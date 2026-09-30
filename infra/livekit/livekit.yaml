@@ -1,0 +1,27 @@
+port: 7880
+bind_addresses:
+    - ""
+rtc:
+    tcp_port: 7881
+    port_range_start: 50000
+    port_range_end: 60000
+    use_external_ip: false
+    enable_loopback_candidate: false
+redis:
+    address: localhost:6379
+turn:
+    enabled: true
+    domain: turn.localhost
+    tls_port: 5349
+    udp_port: 3478
+    external_tls: true
+ingress:
+    rtmp_base_url: rtmp://livekit.localhost:1935/x
+    whip_base_url: https://whip.localhost/w
+keys:
+    devkey: secret
+webhook:
+    # signs requests with this key; apps/livekit-temporal verifies them
+    api_key: devkey
+    urls:
+        - http://localhost:3100/webhook

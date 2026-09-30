@@ -19,5 +19,9 @@
     "@types/node": "^20.19.43",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "exports": {
+    "./shared": "./src/shared.ts",
+    "./client": "./src/client.ts"
   }
 }

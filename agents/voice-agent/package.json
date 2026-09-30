@@ -1,0 +1,25 @@
+{
+  "name": "voice-agent",
+  "private": true,
+  "type": "module",
+  "description": "Local voice agent (Whisper STT, LM Studio LLM, Kokoro TTS) that reports transcripts to Temporal",
+  "scripts": {
+    "dev": "node --env-file=../../.env --import tsx src/agent.ts dev",
+    "start": "node --env-file=../../.env --import tsx src/agent.ts start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.9.1",
+    "@livekit/agents-plugin-openai": "^1.9.1",
+    "@livekit/agents-plugin-silero": "^1.9.1",
+    "@livekit/rtc-node": "^1.1.0",
+    "@temporalio/client": "^1.24.0",
+    "@temporalio/common": "^1.24.0",
+    "livekit-temporal": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

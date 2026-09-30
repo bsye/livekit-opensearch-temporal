@@ -1,0 +1,11 @@
+{
+  "name": "livekit-localhost",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "agents/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

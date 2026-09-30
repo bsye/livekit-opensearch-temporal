@@ -46,6 +46,29 @@ export interface ParticipantState {
   tracks: Record<string, TrackState>;
 }
 
+/** A finalized conversation turn, sent by the agent (agents/voice-agent). */
+export interface TranscriptEntry {
+  role: string; // user | assistant
+  text: string;
+  participant: string; // identity of the speaker (the agent's own identity for assistant turns)
+  at: number; // unix ms
+  interrupted?: boolean;
+}
+
+/** One pipeline stage measurement from the agent (STT, end-of-utterance, LLM, TTS). */
+export interface AgentMetric {
+  type: string; // stt_metrics | eou_metrics | llm_metrics | tts_metrics
+  at: number; // unix ms
+  durationMs?: number;
+  ttftMs?: number; // LLM time to first token
+  ttfbMs?: number; // TTS time to first byte
+  endOfUtteranceDelayMs?: number;
+  transcriptionDelayMs?: number;
+  audioDurationMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
 export interface RoomState {
   sid?: string;
   name?: string;
@@ -53,9 +76,13 @@ export interface RoomState {
   finishedAt?: string;
   participants: Record<string, ParticipantState>; // by identity
   egress: Record<string, { status?: string }>;
+  transcript: TranscriptEntry[];
+  metrics: AgentMetric[];
   eventCount: number;
   duplicateCount: number;
 }
 
 export const livekitEvent = defineSignal<[LiveKitEvent]>('livekitEvent');
+export const transcript = defineSignal<[TranscriptEntry]>('transcript');
+export const agentMetrics = defineSignal<[AgentMetric]>('agentMetrics');
 export const roomState = defineQuery<RoomState>('roomState');

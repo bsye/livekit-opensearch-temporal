@@ -1,8 +1,10 @@
 import { condition, setHandler, sleep, upsertSearchAttributes } from '@temporalio/workflow';
 import {
+  agentMetrics,
   livekitEvent,
   ParticipantIdentities,
   roomState,
+  transcript,
   type LiveKitEvent,
   type RoomState,
 } from './shared.js';
@@ -14,7 +16,14 @@ const MAX_SESSION = '24 hours';
 
 /** One workflow per LiveKit room session (workflow id = room sid). */
 export async function roomSession(): Promise<RoomState & { endReason: string }> {
-  const state: RoomState = { participants: {}, egress: {}, eventCount: 0, duplicateCount: 0 };
+  const state: RoomState = {
+    participants: {},
+    egress: {},
+    transcript: [],
+    metrics: [],
+    eventCount: 0,
+    duplicateCount: 0,
+  };
   const seen = new Set<string>();
   let finished = false;
 
@@ -29,6 +38,8 @@ export async function roomSession(): Promise<RoomState & { endReason: string }> 
     apply(state, e);
     if (e.event === 'room_finished') finished = true;
   });
+  setHandler(transcript, (entry) => void state.transcript.push(entry));
+  setHandler(agentMetrics, (metric) => void state.metrics.push(metric));
   setHandler(roomState, () => state);
 
   const roomFinished = await condition(() => finished, MAX_SESSION);

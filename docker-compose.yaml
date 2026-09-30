@@ -101,5 +101,16 @@ services:
     depends_on:
       - temporal
 
+  # --- Local speech: OpenAI-compatible STT (faster-whisper) + TTS (Kokoro), CPU ---
+  # The LLM runs natively on macOS (LM Studio) for Metal GPU access, not in Docker.
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - speaches-models:/home/ubuntu/.cache/huggingface/hub
+
 volumes:
   temporal-postgres:
+  speaches-models:

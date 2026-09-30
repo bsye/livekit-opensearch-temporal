@@ -1,4 +1,5 @@
-// Local voice agent: Silero VAD → Whisper STT (speaches) → LLM (LM Studio) → Kokoro TTS (speaches).
+// Local voice agent, all on the Apple GPU:
+// Silero VAD → Parakeet STT (mlx-audio) → LLM (LM Studio) → Kokoro TTS (mlx-audio).
 // Every finalized conversation turn and pipeline metric is signalled to the room's
 // Temporal RoomSession workflow (apps/livekit-temporal).
 import { fileURLToPath } from 'node:url';
@@ -23,9 +24,15 @@ Keep replies short and conversational: one or two sentences, no markdown, lists 
 // Local servers don't check API keys, but the OpenAI client requires one
 const LOCAL_API_KEY = 'local';
 
+// Turn-taking latency budget. The user's turn ends after VAD_SILENCE_MS of silence plus
+// ENDPOINTING_MIN_DELAY_MS; lower values answer faster but cut in on mid-sentence pauses.
+// SDK defaults are 550ms + 500ms.
+const VAD_SILENCE_MS = 300;
+const ENDPOINTING_MIN_DELAY_MS = 150;
+
 export default defineAgent({
   prewarm: async (proc: JobProcess) => {
-    proc.userData.vad = await silero.VAD.load();
+    proc.userData.vad = await silero.VAD.load({ minSilenceDuration: VAD_SILENCE_MS });
   },
 
   entry: async (ctx: JobContext) => {
@@ -38,7 +45,7 @@ export default defineAgent({
         apiKey: LOCAL_API_KEY,
         model: env('STT_MODEL'),
         language: 'en',
-        useRealtime: false, // speaches serves the batch /audio/transcriptions API; VAD segments the audio
+        useRealtime: false, // batch /audio/transcriptions per VAD segment; parakeet takes ~60ms
       }),
       llm: new openai.LLM({
         baseURL: env('LLM_BASE_URL'),
@@ -52,6 +59,13 @@ export default defineAgent({
         model: env('TTS_MODEL'),
         voice: env('TTS_VOICE') as openai.TTSVoices, // Kokoro voice ids, not OpenAI's
       }),
+      turnHandling: {
+        // plain VAD endpointing: the default turn-detector model is a LiveKit Cloud/extra-inference step
+        turnDetection: 'vad',
+        endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS },
+        // start the LLM *and* TTS on the final transcript, before the turn is confirmed
+        preemptiveGeneration: { enabled: true, preemptiveTts: true },
+      },
     });
 
     await session.start({ agent: new voice.Agent({ instructions: INSTRUCTIONS }), room: ctx.room });
@@ -86,6 +100,20 @@ export default defineAgent({
       metrics.logMetrics(m);
       const metric = toAgentMetric(m, createdAt);
       if (metric) report(agentMetrics, metric);
+    });
+
+    // Voice-to-voice latency: user stops speaking → agent starts speaking. VAD only reports
+    // the end of speech after VAD_SILENCE_MS of silence, so that is added back in.
+    let userStoppedAt: number | undefined;
+    session.on(voice.AgentSessionEventTypes.UserStateChanged, ({ oldState, newState, createdAt }) => {
+      if (oldState === 'speaking' && newState === 'listening') userStoppedAt = createdAt;
+    });
+    session.on(voice.AgentSessionEventTypes.AgentStateChanged, ({ newState, createdAt }) => {
+      if (newState !== 'speaking' || userStoppedAt === undefined) return;
+      const durationMs = createdAt - userStoppedAt + VAD_SILENCE_MS;
+      userStoppedAt = undefined;
+      console.log(`voice-to-voice latency: ${durationMs}ms`);
+      report(agentMetrics, { type: 'turn_latency', at: createdAt, durationMs });
     });
 
     session.generateReply({ instructions: 'Greet the user in one short sentence.' });

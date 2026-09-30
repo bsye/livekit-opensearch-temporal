@@ -57,7 +57,7 @@ export interface TranscriptEntry {
 
 /** One pipeline stage measurement from the agent (STT, end-of-utterance, LLM, TTS). */
 export interface AgentMetric {
-  type: string; // stt_metrics | eou_metrics | llm_metrics | tts_metrics
+  type: string; // stt_metrics | eou_metrics | llm_metrics | tts_metrics | turn_latency (voice-to-voice)
   at: number; // unix ms
   durationMs?: number;
   ttftMs?: number; // LLM time to first token

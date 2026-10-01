@@ -96,9 +96,11 @@ Measured on an M5 Max:
 | TTS first audio | `Kokoro-82M-8bit` (bf16: ~390ms) | ~200ms |
 | Voice-to-voice | `turn_latency` metric | ~2–2.7s |
 
-Turn-taking is tuned in `agents/voice-agent/src/agent.ts`: 400ms VAD silence + 300ms
-endpointing delay, barge-in needs 600ms and 2+ words, and the LLM (not TTS) starts
-preemptively on the final transcript. Tighter settings split sentences at natural pauses
+Turn-taking is tuned in `agents/voice-agent/src/agent.ts`: LiveKit's audio turn detector
+(`inference.TurnDetector` v1-mini, open weights, local CPU, bundled in `@livekit/agents`)
+decides from intonation whether a pause ends the turn, after 300ms VAD silence and within
+300–2500ms endpointing; barge-in needs 600ms and 2+ words; the LLM (not TTS) starts
+preemptively on the final transcript. v1 (more accurate) only runs on LiveKit Cloud. Tighter settings split sentences at natural pauses
 and let "okay" or echo interrupt the agent, which then restarts its reply. Use headphones:
 on laptop speakers the mic picks up the agent's own voice.
 

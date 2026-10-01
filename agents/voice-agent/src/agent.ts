@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   cli,
   defineAgent,
+  inference,
   metrics,
   ServerOptions,
   voice,
@@ -24,11 +25,14 @@ Keep replies short and conversational: one or two sentences, no markdown, lists 
 // Local servers don't check API keys, but the OpenAI client requires one
 const LOCAL_API_KEY = 'local';
 
-// Turn-taking latency budget. The user's turn ends after VAD_SILENCE_MS of silence plus
-// ENDPOINTING_MIN_DELAY_MS (SDK defaults: 550ms + 500ms). At 300ms + 150ms, normal pauses
-// ("There is a… agent orchestration") split one sentence into two turns and two replies.
-const VAD_SILENCE_MS = 400;
-const ENDPOINTING_MIN_DELAY_MS = 300;
+// Turn-taking. VAD reports end of speech after VAD_SILENCE_MS of silence (the turn detector
+// requires >= 250ms); LiveKit's audio turn detector (v1-mini, local CPU) then decides whether
+// the user finished or is just pausing, waiting ENDPOINTING_MIN_DELAY_MS..MAX before committing.
+// Silence alone can't tell the two apart: tuned short it split "There is a… agent orchestration"
+// into two turns, tuned long it slowed every reply.
+const VAD_SILENCE_MS = 300;
+const ENDPOINTING_MIN_DELAY_MS = 300; // LiveKit's recommended values with the audio detector
+const ENDPOINTING_MAX_DELAY_MS = 2500;
 // Barge-in: only real speech interrupts the agent, not "okay"/"mm-hm" or a blip of echo.
 // (The SDK's adaptive backchannel detector is a LiveKit Cloud model, so it isn't available.)
 const INTERRUPTION_MIN_MS = 600;
@@ -64,9 +68,9 @@ export default defineAgent({
         voice: env('TTS_VOICE') as openai.TTSVoices, // Kokoro voice ids, not OpenAI's
       }),
       turnHandling: {
-        // plain VAD endpointing: the default turn-detector model is a LiveKit Cloud/extra-inference step
-        turnDetection: 'vad',
-        endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS },
+        // pinned: in dev mode the default is v1 on LiveKit Cloud, which a self-hosted server can't use
+        turnDetection: new inference.TurnDetector({ version: 'v1-mini' }),
+        endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS, maxDelay: ENDPOINTING_MAX_DELAY_MS },
         interruption: { mode: 'vad', minDuration: INTERRUPTION_MIN_MS, minWords: INTERRUPTION_MIN_WORDS },
         // start the LLM on the final transcript before the turn is confirmed; TTS waits for the
         // confirmed turn, otherwise discarded drafts get spoken and replies sound repeated

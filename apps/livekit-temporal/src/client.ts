@@ -31,6 +31,7 @@ export async function signalRoom<T>(
       // a closed session must not be restarted by a late signal
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
       typedSearchAttributes: room.name ? [{ key: RoomName, value: room.name }] : [],
+      staticSummary: `🏠 ${room.name ?? room.sid}`, // label in the Temporal UI
     });
     return true;
   } catch (err) {

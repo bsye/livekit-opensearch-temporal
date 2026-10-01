@@ -109,7 +109,7 @@ export default defineAgent({
       }
       metrics.logMetrics(m);
       const metric = toAgentMetric(m, createdAt);
-      if (metric) report(agentMetrics, metric);
+      if (metric) report(agentMetrics, { ...metric, participant: agentIdentity });
     });
 
     // Voice-to-voice latency: user stops speaking → agent starts speaking. VAD only reports
@@ -123,7 +123,7 @@ export default defineAgent({
       const durationMs = createdAt - userStoppedAt + VAD_SILENCE_MS;
       userStoppedAt = undefined;
       console.log(`voice-to-voice latency: ${durationMs}ms`);
-      report(agentMetrics, { type: 'turn_latency', at: createdAt, durationMs });
+      report(agentMetrics, { type: 'turn_latency', at: createdAt, durationMs, participant: agentIdentity });
     });
 
     session.generateReply({ instructions: 'Greet the user in one short sentence.' });

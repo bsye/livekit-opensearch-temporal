@@ -59,6 +59,7 @@ export interface TranscriptEntry {
 export interface AgentMetric {
   type: string; // stt_metrics | eou_metrics | llm_metrics | tts_metrics | turn_latency (voice-to-voice)
   at: number; // unix ms
+  participant?: string; // identity of the agent that measured it
   durationMs?: number;
   ttftMs?: number; // LLM time to first token
   ttfbMs?: number; // TTS time to first byte
@@ -82,7 +83,15 @@ export interface RoomState {
   duplicateCount: number;
 }
 
+/** One participant's lane: a participantSession child workflow per participant per room. */
+export interface ParticipantSessionState extends ParticipantState {
+  roomSid: string;
+  transcript: TranscriptEntry[]; // what this participant said
+  metrics: AgentMetric[]; // pipeline metrics, for agents
+}
+
 export const livekitEvent = defineSignal<[LiveKitEvent]>('livekitEvent');
 export const transcript = defineSignal<[TranscriptEntry]>('transcript');
 export const agentMetrics = defineSignal<[AgentMetric]>('agentMetrics');
 export const roomState = defineQuery<RoomState>('roomState');
+export const participantState = defineQuery<ParticipantSessionState>('participantState');

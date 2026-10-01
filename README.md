@@ -54,6 +54,11 @@ workflow per room session:
 - `room_finished` completes the workflow after a 1-minute grace period for late webhooks;
   late events after that are dropped (reuse policy `REJECT_DUPLICATE`)
 - query `roomState` for the live participants/tracks view
+- each participant gets a `participantSession` child workflow (id `RM_…/<identity>`), shown
+  as its own labelled lane in the room's timeline: 🏠 room, 👤 user, 🤖 agent, 📥 ingress,
+  📤 egress, ☎️ SIP. It holds that actor's events, transcript lines and (agents) metrics;
+  query `participantState`. Temporal colours events by type, so lanes and labels are how
+  actors are told apart.
 
 ```sh
 cd apps/livekit-temporal && npm install

@@ -52,3 +52,31 @@ retrievers over its BM25. Fuzzy matching hurts on typed text. Zero-shot Laya re-
 Caveat: our port lands on either side of the paper's BM25 numbers (data version: cleaned vs
 original), so comparisons with the paper's dense rows cross data versions; running a dense
 baseline on the cleaned data is needed to claim parity.
+
+## Dense baseline on the same data: Contriever vs BM25 (LongMemEval_M cleaned, turn granularity)
+
+`facebook/contriever` exactly as the paper's flat-contriever (masked mean pooling, dot product,
+512-token truncation), ONNX in TS, parity with PyTorch to 5 decimals. CPU (CoreML was slower).
+
+| retriever | turn R_all@5 | turn R_any@5 | turn NDCG@5 | turn R_all@10 | turn NDCG@10 | session R_any@5 | p50 ms | p95 ms |
+|---|---|---|---|---|---|---|---|---|
+| bm25-paper | 0.356 | 0.573 | 0.408 | 0.437 | 0.435 | 0.582 | 21 | 28 |
+| contriever | 0.456 | 0.740 | 0.491 | 0.604 | 0.541 | 0.809 | 3067 | 16752 |
+| **bm25 (OpenSearch)** | **0.556** | **0.800** | **0.598** | **0.654** | **0.630** | **0.823** | **46** | **66** |
+
+session recall_any@5 by question type:
+
+| question type | n | contriever | bm25-paper | bm25 |
+|---|---|---|---|---|
+| knowledge-update | 72 | 0.944 | 0.792 | **0.958** |
+| multi-session | 121 | **0.868** | 0.529 | 0.843 |
+| single-session-assistant | 5 | 0.800 | 0.400 | 0.800 |
+| single-session-preference | 30 | **0.667** | 0.233 | 0.333 |
+| single-session-user | 64 | 0.766 | 0.609 | **0.922** |
+| temporal-reasoning | 127 | 0.732 | 0.591 | **0.795** |
+
+- Harness check: contriever beats bm25-paper by +0.100 turn R@5 here vs +0.117 in the paper (round R@5).
+- Properly tokenised BM25 beats the paper's dense baseline overall (+0.10 turn R_all@5, +0.09 NDCG@10)
+  at ~65x lower latency; dense wins on preference questions (paraphrase, no shared words) and slightly
+  on multi-session.
+- Not measured: Stella V5 1.5B (paper: ~+0.07 over Contriever at round level).

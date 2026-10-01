@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "agents/*"
+    "agents/*",
+    "benchmarks/*"
   ],
   "scripts": {
     "meet": "scripts/meet.sh",

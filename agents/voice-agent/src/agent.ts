@@ -1,12 +1,14 @@
 // Local voice agent, all on the Apple GPU:
 // Silero VAD → Parakeet STT (mlx-audio) → LLM (LM Studio) → Kokoro TTS (mlx-audio).
 // Every finalized conversation turn and pipeline metric is signalled to the room's
-// Temporal RoomSession workflow (apps/livekit-temporal).
+// Temporal RoomSession workflow (apps/livekit-temporal). Tool calls pass the action gate
+// (gate.ts) first; reminders run as durable Temporal workflows.
 import { fileURLToPath } from 'node:url';
 import {
   cli,
   defineAgent,
   inference,
+  llm,
   metrics,
   ServerOptions,
   voice,
@@ -15,11 +17,16 @@ import {
 } from '@livekit/agents';
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
-import { connectTemporal, signalRoom } from 'livekit-temporal/client';
+import { connectTemporal, signalRoom, startReminder } from 'livekit-temporal/client';
 import type { AgentMetric, RoomSignal } from 'livekit-temporal/shared';
+import { z } from 'zod';
+import { ActionGate, checkTime } from './gate.js';
 
-const INSTRUCTIONS = `You are a helpful voice assistant running fully on local models.
-Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.`;
+const instructions = (now: Date) => `You are a helpful voice assistant running fully on local models.
+Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.
+You can set reminders with the set_reminder tool, only when the user asks to be reminded.
+If a tool says it needs confirmation, ask the user exactly what it says and wait for the answer.
+The current local time is ${now.toTimeString().slice(0, 5)}, ${now.toDateString()}.`;
 
 // Local servers don't check API keys, but the OpenAI client requires one
 const LOCAL_API_KEY = 'local';
@@ -77,16 +84,61 @@ export default defineAgent({
       },
     });
 
-    await session.start({ agent: new voice.Agent({ instructions: INSTRUCTIONS }), room: ctx.room });
-    await ctx.connect();
-
-    const room = { sid: await ctx.room.getSid(), name: ctx.room.name };
-    const agentIdentity = ctx.room.localParticipant?.identity ?? 'agent';
+    // Set once connected; tools only run after that
+    let room = { sid: '', name: '' };
+    let agentIdentity = 'agent';
     const report = (signal: RoomSignal) =>
       signalRoom(temporal, room, signal).catch((err) => console.error(`temporal ${signal.type} signal failed`, err));
 
+    // What the user said (for the gate): the last two turns, or everything since a moment
+    const userTurns: { text: string; at: number }[] = [];
+    const recentUserText = (since?: number) =>
+      (since === undefined ? userTurns.slice(-2) : userTurns.filter((t) => t.at > since)).map((t) => t.text).join(' ');
+    const gate = new ActionGate(
+      env('LAYA_BASE_URL'),
+      () => agentIdentity,
+      recentUserText,
+      (decision) => report({ type: 'gate', data: decision }),
+    );
+
+    const setReminder = llm.tool({
+      description: 'Set a reminder for the user at a time today or tomorrow. Only when the user asks to be reminded.',
+      parameters: z.object({
+        text: z.string().describe('What to remind about, short, e.g. "call mom"'),
+        time: z.string().describe('24-hour time HH:MM, e.g. "18:00" for 6pm'),
+        day: z.enum(['today', 'tomorrow']),
+      }),
+      execute: async ({ text, time, day }) => {
+        if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(time)) return 'time must be 24-hour HH:MM; ask the user for the time.';
+        const outcome = await gate.check({
+          tool: 'set_reminder',
+          args: { text, time, day },
+          description: `a reminder to ${text} at ${time} ${day}`,
+          checkValues: (userText) => checkTime(time, day, userText),
+        });
+        if (!outcome.run) return outcome.tellModel;
+        const fireAt = fireTime(time, day);
+        await startReminder(
+          temporal,
+          { text, fireAt, when: `${time} ${day}`, roomSid: room.sid, participant: userIdentity(ctx) ?? 'user' },
+          room.name,
+        );
+        return `Done: reminder to ${text} at ${time} ${day}.`;
+      },
+    });
+
+    await session.start({
+      agent: new voice.Agent({ instructions: instructions(new Date()), tools: { set_reminder: setReminder } }),
+      room: ctx.room,
+    });
+    await ctx.connect();
+
+    room = { sid: await ctx.room.getSid(), name: ctx.room.name ?? '' };
+    agentIdentity = ctx.room.localParticipant?.identity ?? 'agent';
+
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, ({ item, createdAt }) => {
       if (item.type !== 'message' || !item.textContent) return;
+      if (item.role === 'user') userTurns.push({ text: item.textContent, at: createdAt });
       report({
         type: 'transcript',
         data: {
@@ -158,6 +210,15 @@ function toAgentMetric(m: metrics.AgentMetrics, at: number): AgentMetric | undef
     default:
       return undefined; // VAD metrics fire continuously; not useful per turn
   }
+}
+
+/** Next occurrence of HH:MM local time today or tomorrow, as unix ms. */
+function fireTime(time: string, day: 'today' | 'tomorrow'): number {
+  const [h, m] = time.split(':').map(Number);
+  const at = new Date();
+  at.setHours(h, m, 0, 0);
+  if (day === 'tomorrow') at.setDate(at.getDate() + 1);
+  return at.getTime();
 }
 
 /** The first remote participant; this agent serves one user per room. */

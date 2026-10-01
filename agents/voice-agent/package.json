@@ -15,7 +15,8 @@
     "@livekit/rtc-node": "^1.1.0",
     "@temporalio/client": "^1.24.0",
     "@temporalio/common": "^1.24.0",
-    "livekit-temporal": "*"
+    "livekit-temporal": "*",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

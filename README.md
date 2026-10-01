@@ -27,6 +27,7 @@ One-time prerequisites are under [One-time setup](#one-time-setup).
 | Webhook translator | `http://localhost:3100/webhook` |
 | Speech (STT + TTS, mlx-audio on the GPU) | `http://localhost:8000/v1` |
 | LLM (LM Studio) | `http://localhost:1234/v1` |
+| Action gate (Laya, MLX) | `http://localhost:8100/v1/systemone` (Jev-compatible) |
 
 Credentials are in `.env` (template: `.env.example`; must match `keys` in `infra/livekit/livekit.yaml`).
 
@@ -40,6 +41,7 @@ data/                 runtime data written by containers (gitignored; data/caddy
 apps/livekit-temporal/ LiveKit webhook → Temporal translator + RoomSession workflow worker (TypeScript)
 agents/voice-agent/   local voice agent (Agents SDK, TypeScript) reporting to Temporal
 services/mlx-audio/   native MLX speech server (Apple GPU), run outside Docker
+services/laya/        native MLX Laya decision server for the action gate (Python model sidecar)
 package.json          npm workspaces (apps/*, agents/*); run `npm install` at the root
 ```
 
@@ -135,6 +137,25 @@ Notes:
   subscribed to its audio.
 - Startup warnings about the cloud turn detector and session events are LiveKit Cloud
   features falling back to local equivalents.
+
+## Tools and the action gate
+
+The agent has one tool, `set_reminder(text, time, day)`. Every tool call passes the
+action gate (`agents/voice-agent/src/gate.ts`) before it runs:
+
+1. **Intent** — Laya (open-weights decision model, local MLX, ~5–13ms incl. HTTP): does the
+   call match what the user asked? Catches unrelated actions and negations.
+2. **Values** — plain code: every value must match what the user said (hour, AM/PM,
+   today/tomorrow). Laya alone approved "50 euros" → `amount=500` at p=1.00
+   (`services/laya/eval_gate.py`), so exact values are never left to the model.
+3. **Confirm** — if 1 or 2 flag it (or the tool is high-stakes), the agent asks
+   "Just to confirm: …, right?" and Laya reads the reply (agree ≥ 0.75, decline ≤ 0.25).
+
+Each decision is a `gate` signal in the agent's lane (`🛡 agent-… · gate set_reminder →
+pass`), and approved reminders run as durable `reminder` workflows (a timer labelled
+`⏰ call mom @ 18:00 today`). Policy: the model speaks optimistically, but nothing with
+consequences runs unverified. Python is used only for model servers in `services/`; all
+app/API code is TypeScript.
 
 ## Differences from the Linux setup
 

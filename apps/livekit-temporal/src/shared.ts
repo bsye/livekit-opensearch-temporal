@@ -70,6 +70,29 @@ export interface AgentMetric {
   completionTokens?: number;
 }
 
+/** An action-gate decision made by an agent before running a tool (agents/voice-agent/src/gate.ts). */
+export interface GateDecision {
+  tool: string;
+  args: Record<string, unknown>;
+  // pass: ran without asking · confirm: asked the user first · confirmed/declined: the user's answer
+  decision: 'pass' | 'confirm' | 'confirmed' | 'declined';
+  reasons: string[];
+  intent?: number; // Laya: P(action matches the request)
+  agreement?: number; // Laya: P(user's reply agrees), for confirmed/declined
+  latencyMs: number;
+  at: number; // unix ms
+  participant: string; // the agent's identity
+}
+
+/** Input of the reminder workflow started by the set_reminder tool. */
+export interface ReminderInput {
+  text: string;
+  fireAt: number; // unix ms
+  when: string; // as shown to the user, e.g. "18:00 today"
+  roomSid: string;
+  participant: string; // who asked for it
+}
+
 export interface RoomState {
   sid?: string;
   name?: string;
@@ -79,6 +102,7 @@ export interface RoomState {
   egress: Record<string, { status?: string }>;
   transcript: TranscriptEntry[];
   metrics: AgentMetric[];
+  gates?: GateDecision[]; // optional: rooms started before the action gate don't have it
   eventCount: number;
   duplicateCount: number;
 }
@@ -88,6 +112,7 @@ export interface ParticipantSessionState extends ParticipantState {
   roomSid: string;
   transcript: TranscriptEntry[]; // what this participant said
   metrics: AgentMetric[]; // pipeline metrics, for agents
+  gates?: GateDecision[]; // action-gate decisions, for agents
 }
 
 // Fixed-name signals: what senders used before labelled signals; still handled for those rooms
@@ -105,7 +130,8 @@ export const participantState = defineQuery<ParticipantSessionState>('participan
 export type RoomSignal =
   | { type: 'livekitEvent'; data: LiveKitEvent }
   | { type: 'transcript'; data: TranscriptEntry }
-  | { type: 'agentMetrics'; data: AgentMetric };
+  | { type: 'agentMetrics'; data: AgentMetric }
+  | { type: 'gate'; data: GateDecision };
 
 /** Icon per LiveKit participant kind (protobuf JSON enum names). */
 export function actorIcon(kind: string | undefined): string {
@@ -153,6 +179,11 @@ export function signalLabel(s: RoomSignal): string {
         : m.type === 'turn_latency' ? `⏱ voice-to-voice ${ms(m.durationMs)}`
         : m.type;
       return `🤖 ${m.participant ?? 'agent'} · ${what}`;
+    }
+    case 'gate': {
+      const g = s.data;
+      const why = g.reasons.length ? ` (${g.reasons.join('; ')})` : '';
+      return `🛡 ${g.participant} · gate ${g.tool} → ${g.decision}${why}`;
     }
   }
 }

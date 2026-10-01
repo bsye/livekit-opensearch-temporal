@@ -1,8 +1,8 @@
 // Temporal client helpers shared by the translator and the agents (not usable in workflows).
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
-import { RoomName, signalLabel, TASK_QUEUE, type RoomSignal } from './shared.js';
-import { roomSession } from './workflows.js';
+import { RoomName, signalLabel, TASK_QUEUE, type ReminderInput, type RoomSignal } from './shared.js';
+import { reminder, roomSession } from './workflows.js';
 
 export async function connectTemporal(): Promise<Client> {
   return new Client({
@@ -38,4 +38,16 @@ export async function signalRoom(
     if (err instanceof WorkflowExecutionAlreadyStartedError) return false;
     throw err;
   }
+}
+
+/** Start a durable reminder (set_reminder tool); listed under the room's RoomName. */
+export async function startReminder(client: Client, input: ReminderInput, roomName?: string): Promise<string> {
+  const handle = await client.workflow.start(reminder, {
+    workflowId: `reminder-${input.roomSid}-${input.fireAt}`,
+    taskQueue: TASK_QUEUE,
+    args: [input],
+    staticSummary: `⏰ ${input.text} @ ${input.when}`,
+    typedSearchAttributes: roomName ? [{ key: RoomName, value: roomName }] : [],
+  });
+  return handle.workflowId;
 }

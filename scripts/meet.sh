@@ -69,12 +69,14 @@ echo "  ready"
 
 step "Native services"
 start mlx-audio 'mlx_audio.server' services/mlx-audio/run.sh
+start laya 'services/laya/server.py' services/laya/run.sh
 start worker 'src/worker.ts' npm run worker -w livekit-temporal
 start translator 'src/translator.ts' npm run translator -w livekit-temporal
 start agent 'src/agent.ts' npm run dev -w voice-agent
 
 # A process started earlier (by us or by hand) has no fresh log to check, so fall back to probes
 wait_for "mlx-audio (STT + TTS)" 180 curl -sf "$SPEECH_BASE_URL/models"
+wait_for "laya (action gate)" 120 curl -sf "$LAYA_BASE_URL/health"
 wait_for "translator" 60 curl -sf "http://localhost:${TRANSLATOR_PORT:-3100}/healthz"
 if [ -f "$RUN/worker.pid" ] && kill -0 "$(cat "$RUN/worker.pid")" 2>/dev/null; then
   wait_for "Temporal worker" 60 grep -q "state: 'RUNNING'" "$RUN/worker.log"

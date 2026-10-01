@@ -20,6 +20,7 @@ import {
   transcript,
   type LiveKitEvent,
   type ParticipantSessionState,
+  type ReminderInput,
   type RoomSignal,
   type RoomState,
 } from './shared.js';
@@ -79,6 +80,10 @@ export async function roomSession(): Promise<RoomState & { endReason: string }> 
       case 'agentMetrics':
         state.metrics.push(signal.data);
         if (withLanes && signal.data.participant) lanes.forward(signal.data.participant, 'AGENT', signal, label);
+        break;
+      case 'gate':
+        (state.gates ??= []).push(signal.data);
+        if (withLanes) lanes.forward(signal.data.participant, 'AGENT', signal, label);
         break;
     }
   };
@@ -144,6 +149,9 @@ export async function participantSession(init: {
       case 'agentMetrics':
         state.metrics.push(signal.data);
         break;
+      case 'gate':
+        (state.gates ??= []).push(signal.data);
+        break;
     }
   };
   setDefaultSignalHandler((_name, payload) => {
@@ -161,6 +169,14 @@ export async function participantSession(init: {
     await sleep(PARTICIPANT_LATE_EVENT_GRACE, labelled ? { summary: '⏳ grace period for late events' } : undefined);
   }
   return { ...state, endReason: hasLeft ? 'left' : 'timeout' };
+}
+
+/** A reminder set by the agent's set_reminder tool: a durable timer that fires at fireAt. */
+export async function reminder(input: ReminderInput): Promise<ReminderInput & { firedAt: number }> {
+  const wait = input.fireAt - Date.now(); // Date.now() is replay-safe inside workflows
+  if (wait > 0) await sleep(wait, { summary: `⏰ until ${input.when}` });
+  // Delivery (push, call back into the room, …) is a next step; firing is recorded in history
+  return { ...input, firedAt: Date.now() };
 }
 
 /**
@@ -201,7 +217,7 @@ class ParticipantLanes {
 
 function isRoomSignal(payload: unknown): payload is RoomSignal {
   const type = (payload as RoomSignal | undefined)?.type;
-  return type === 'livekitEvent' || type === 'transcript' || type === 'agentMetrics';
+  return type === 'livekitEvent' || type === 'transcript' || type === 'agentMetrics' || type === 'gate';
 }
 
 function apply(state: RoomState, e: LiveKitEvent): void {

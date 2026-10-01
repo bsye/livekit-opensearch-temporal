@@ -148,6 +148,10 @@ export interface RecallResult {
 // re-ranked by MiniLM (0.652 recall@5, ~70 ms). Re-rankers trained on web search hurt questions
 // asking for the user's preferences, so Laya routes those (~5 ms) to LLM query expansion instead.
 const RERANK_DEPTH = 20;
+// MiniLM scores are logits: below 0 the model judges the passage not relevant. Passing those on
+// let the LLM blend unrelated messages into answers ("Computer Science from UCLA" from a message
+// about applying to a master's), so they're dropped; no hit left means "I don't remember".
+const MIN_RERANK_SCORE = 0;
 const PREFERENCE_THRESHOLD = 0.5;
 const EXPANSION_WEIGHT = 0.5;
 const PREFERENCE_QUESTION =
@@ -198,6 +202,7 @@ export async function recall(q: RecallQuery): Promise<RecallResult> {
   lap('rerank', t);
   const hits = candidates
     .map((c, i) => ({ doc: c._source, score: scores[i] }))
+    .filter((h) => h.score >= MIN_RERANK_SCORE)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
   return { hits, route: 'rerank', timings, ms: Date.now() - started };

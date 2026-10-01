@@ -1,6 +1,7 @@
 import {
   condition,
   patched,
+  proxyActivities,
   setDefaultSignalHandler,
   setHandler,
   sleep,
@@ -24,7 +25,9 @@ import {
   type ReminderInput,
   type RoomSignal,
   type RoomState,
+  type TranscriptEntry,
 } from './shared.js';
+import type * as activities from './activities.js';
 
 // Webhooks can arrive after room_finished; keep the workflow open briefly to record them.
 const LATE_EVENT_GRACE = '1 minute';
@@ -55,6 +58,8 @@ export async function roomSession(): Promise<RoomState & { endReason: string }> 
   };
   const seen = new Set<string>();
   const lanes = new ParticipantLanes(() => state.name, labelled);
+  const memory = new MemoryIndexer(() => state.sid ?? workflowInfo().workflowId, () => state.name);
+  const withMemory = patched('memory-index');
   let finished = false;
 
   // label = the signal name, forwarded unchanged so the participant lane shows the same text
@@ -77,6 +82,7 @@ export async function roomSession(): Promise<RoomState & { endReason: string }> 
       case 'transcript':
         state.transcript.push(signal.data);
         if (withLanes) lanes.forward(signal.data.participant, undefined, signal, label);
+        if (withMemory) memory.add(signal.data);
         break;
       case 'agentMetrics':
         state.metrics.push(signal.data);
@@ -178,6 +184,45 @@ export async function reminder(input: ReminderInput): Promise<ReminderInput & { 
   if (wait > 0) await sleep(wait, { summary: `⏰ until ${input.when}` });
   // Delivery (push, call back into the room, …) is a next step; firing is recorded in history
   return { ...input, firedAt: Date.now() };
+}
+
+/**
+ * Groups the transcript into exchanges (user turn(s) + the agent's reply) and indexes each one
+ * into conversation memory as an activity: a labelled row on the room's timeline.
+ */
+class MemoryIndexer {
+  private userTurns: TranscriptEntry[] = [];
+
+  constructor(
+    private roomSid: () => string,
+    private roomName: () => string | undefined,
+  ) {}
+
+  add(entry: TranscriptEntry): void {
+    if (entry.role !== 'assistant') {
+      this.userTurns.push(entry);
+      return;
+    }
+    if (this.userTurns.length === 0) return; // greeting or follow-up with no user turn to pair
+    const turns = this.userTurns;
+    this.userTurns = [];
+    const userText = turns.map((t) => t.text).join(' ');
+    const { indexConversationExchange } = proxyActivities<typeof activities>({
+      startToCloseTimeout: '30 seconds',
+      retry: { maximumAttempts: 5 },
+      summary: `🧠 remember: “${userText.length > 50 ? `${userText.slice(0, 47)}…` : userText}”`,
+    });
+    void indexConversationExchange({
+      roomSid: this.roomSid(),
+      roomName: this.roomName(),
+      user: turns[0].participant,
+      agent: entry.participant,
+      userText,
+      agentText: entry.text,
+      startedAt: turns[0].at,
+      endedAt: entry.at,
+    }).catch(() => undefined); // indexing failures must not fail the room session
+  }
 }
 
 /** Simulated outbox: records an approved email; a real version would call an email activity. */

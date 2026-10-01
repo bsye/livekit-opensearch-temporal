@@ -27,7 +27,9 @@ One-time prerequisites are under [One-time setup](#one-time-setup).
 | Webhook translator | `http://localhost:3100/webhook` |
 | Speech (STT + TTS, mlx-audio on the GPU) | `http://localhost:8000/v1` |
 | LLM (LM Studio) | `http://localhost:1234/v1` |
-| Action gate (Laya, MLX) | `http://localhost:8100/v1/systemone` (Jev-compatible) |
+| Laya (MLX decision model) | `http://localhost:8100/v1/systemone` (Jev-compatible), `/v1/scan` (batched) |
+| Conversation memory (OpenSearch) | `http://localhost:9201` (index `conversation-memory`) |
+| OpenSearch Dashboards | http://localhost:5602 (Discover → `conversation-memory`, time field `endedAt`) |
 
 Credentials are in `.env` (template: `.env.example`; must match `keys` in `infra/livekit/livekit.yaml`).
 
@@ -41,7 +43,7 @@ data/                 runtime data written by containers (gitignored; data/caddy
 apps/livekit-temporal/ LiveKit webhook → Temporal translator + RoomSession workflow worker (TypeScript)
 agents/voice-agent/   local voice agent (Agents SDK, TypeScript) reporting to Temporal
 services/mlx-audio/   native MLX speech server (Apple GPU), run outside Docker
-services/laya/        native MLX Laya decision server for the action gate (Python model sidecar)
+services/laya/        native MLX Laya decision server: audit, categorisation, memory scan (Python model sidecar)
 package.json          npm workspaces (apps/*, agents/*); run `npm install` at the root
 ```
 
@@ -137,6 +139,22 @@ Notes:
   subscribed to its audio.
 - Startup warnings about the cloud turn detector and session events are LiveKit Cloud
   features falling back to local equivalents.
+
+## Conversation memory (no embeddings)
+
+Every exchange (the user's turn(s) + the agent's reply) is indexed while the conversation
+happens, by a Temporal activity scheduled from the room workflow (`🧠 remember: “…”` rows on
+its timeline; `apps/livekit-temporal/src/activities.ts`, `memory.ts`):
+
+- Laya categorises it in one call: topic from a fixed taxonomy (`work`, `personal`, `travel`,
+  `health`, `money`, `tech`, `smalltalk`) and whether it holds a task or commitment
+- OpenSearch stores it with exact times (`startedAt`, `endedAt`), room, participants, text
+
+The agent's `recall` tool answers "what did we say about…": OpenSearch narrows by time range
+and keywords (BM25), then **every candidate is scored in parallel by Laya** (`/v1/scan`,
+batched on the GPU: ~0.5ms per exchange warm, 1,000 exchanges ≈ 0.5s), and the top hits come
+back with when they were said. No embeddings anywhere. Measured: 2 hits from 3 exchanges in
+246ms. Retrieval accuracy isn't evaluated yet.
 
 ## Tools: risk tiers, approval and audit
 

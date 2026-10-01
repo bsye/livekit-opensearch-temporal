@@ -21,11 +21,13 @@ import * as silero from '@livekit/agents-plugin-silero';
 import { connectTemporal, signalRoom } from 'livekit-temporal/client';
 import type { AgentMetric, GateDecision, RoomSignal } from 'livekit-temporal/shared';
 import { ActionAuditor } from './audit.js';
+import { stripControlTokens } from './llm_filter.js';
 import { createTools } from './tools.js';
 
 const instructions = (now: Date) => `You are a helpful voice assistant running fully on local models.
 Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.
 Use tools only when the user asks for that action. After a tool runs, tell the user what it did.
+When the user asks about something you talked about before, use recall.
 If the user corrects a reminder or says undo, cancel it (and set the corrected one).
 The current local time is ${now.toTimeString().slice(0, 5)}, ${now.toDateString()}.`;
 
@@ -108,7 +110,14 @@ export default defineAgent({
     });
 
     await session.start({
-      agent: new voice.Agent({ instructions: instructions(new Date()), tools }),
+      agent: voice.Agent.create({
+        instructions: instructions(new Date()),
+        tools,
+        llmNode: async (agentCtx, chatCtx, toolCtx, settings) => {
+          const stream = await voice.Agent.default.llmNode(agentCtx.agent, chatCtx, toolCtx, settings);
+          return stream ? stripControlTokens(stream) : null;
+        },
+      }),
       room: ctx.room,
     });
     await ctx.connect();

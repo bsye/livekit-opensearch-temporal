@@ -4,10 +4,11 @@
   "type": "module",
   "description": "LongMemEval retrieval benchmark for conversation memory (BM25 / parallel Laya / hybrid)",
   "scripts": {
-    "bench": "node --max-old-space-size=4096 --env-file=../../.env --import tsx src/run.ts",
+    "bench": "node --max-old-space-size=6144 --env-file=../../.env --import tsx src/run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "stream-json": "^1.9.1"
   },
   "devDependencies": {

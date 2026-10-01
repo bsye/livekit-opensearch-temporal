@@ -4,6 +4,7 @@
 //        [--granularity turn|session] [--methods bm25,bm25-fuzzy,bm25+laya,laya] [--limit N] [--fresh]
 //
 // Retrievers (same corpus, labels and metrics as the official run_retrieval.py):
+//   contriever  facebook/contriever (dense embeddings, the paper's dense baseline; benchmark only)
 //   bm25-paper  the paper's own BM25 (rank_bm25 BM25Okapi on space-split text), in-process
 //   bm25        OpenSearch BM25 (english analyzer: lowercasing, stemming, stopwords)
 //   bm25-fuzzy  BM25 with fuzzy term matching (tolerates misspellings / speech-to-text errors)
@@ -17,6 +18,7 @@ import { createReadStream, appendFileSync, existsSync, mkdirSync, readFileSync, 
 import { fileURLToPath } from 'node:url';
 import StreamArray from 'stream-json/streamers/StreamArray.js';
 import { bm25OkapiRanking } from './bm25okapi.js';
+import { contrieverRanking, loadContriever } from './contriever.js';
 import {
   buildCorpus,
   evaluateRetrieval,
@@ -33,7 +35,7 @@ const OPENSEARCH = process.env.OPENSEARCH_URL ?? 'http://localhost:9201';
 const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
 const DATA = new URL('../../../data/benchmarks/longmemeval/', import.meta.url);
 const RERANK_DEPTH = 50;
-const ALL_METHODS = ['bm25-paper', 'bm25', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
+const ALL_METHODS = ['contriever', 'bm25-paper', 'bm25', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
 type Method = (typeof ALL_METHODS)[number];
 
 const arg = (name: string, fallback: string) => {
@@ -51,6 +53,7 @@ const outDir = new URL('results/', DATA);
 mkdirSync(outDir, { recursive: true });
 
 await indexCorpus();
+if (methods.includes('contriever')) await loadContriever();
 
 type Row = {
   question_id: string;
@@ -106,6 +109,12 @@ async function evaluate(q: Question): Promise<Row> {
   const rankings: Partial<Record<Method, number[]>> = {};
 
   let t = Date.now();
+  if (methods.includes('contriever')) {
+    rankings.contriever = await contrieverRanking(corpus.map((d) => d.text), q.question);
+    row.latencyMs.contriever = Date.now() - t;
+    row.scanned.contriever = corpus.length;
+    t = Date.now();
+  }
   if (methods.includes('bm25-paper')) {
     rankings['bm25-paper'] = bm25OkapiRanking(corpus.map((d) => d.text), q.question);
     row.latencyMs['bm25-paper'] = Date.now() - t;

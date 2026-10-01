@@ -19,6 +19,7 @@ import {
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
 import { connectTemporal, signalRoom } from 'livekit-temporal/client';
+import { warmReranker } from 'livekit-temporal/rerank';
 import type { AgentMetric, GateDecision, RoomSignal } from 'livekit-temporal/shared';
 import { ActionAuditor } from './audit.js';
 import { stripControlTokens } from './llm_filter.js';
@@ -50,6 +51,7 @@ const INTERRUPTION_MIN_WORDS = 2;
 export default defineAgent({
   prewarm: async (proc: JobProcess) => {
     proc.userData.vad = await silero.VAD.load({ minSilenceDuration: VAD_SILENCE_MS });
+    await warmReranker(); // memory recall's MiniLM, so the first recall isn't slow
   },
 
   entry: async (ctx: JobContext) => {

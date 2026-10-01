@@ -2,7 +2,7 @@
 //   reversible    set_reminder (runs immediately, reads back) + cancel_reminder (the undo)
 //   consequential send_email (needsApproval: the user confirms before it runs)
 // Every committed action is audited by Laya afterwards (audit.ts).
-// recall searches conversation memory (OpenSearch + a parallel Laya scan, no embeddings).
+// recall searches conversation memory (BM25 + MiniLM re-ranking, Laya routing; no embeddings).
 import { llm } from '@livekit/agents';
 import type { Client } from '@temporalio/client';
 import { cancelReminder, recordEmail, startReminder } from 'livekit-temporal/client';
@@ -89,24 +89,27 @@ export function createTools(deps: ToolDeps) {
   const recallTool = llm.tool({
     description:
       'Search past conversations with the user, e.g. "what did we say about the Lisbon trip?" or ' +
-      '"what did I ask you last week?". Returns matching exchanges with when they happened.',
+      '"what did I ask you last week?". Returns matching past messages with when they happened.',
     parameters: z.object({
-      about: z.string().describe('What to look for, as a short phrase, e.g. "the trip to Lisbon"'),
-      from: z.string().optional().describe('Start of the time range, ISO date/time, if the user gave one'),
-      to: z.string().optional().describe('End of the time range, ISO date/time, if the user gave one'),
+      question: z.string().describe("The user's question, in their own words"),
+      from: z.string().optional().describe('Start of the time range, ISO date/time, only if the user gave one'),
+      to: z.string().optional().describe('End of the time range, ISO date/time, only if the user gave one'),
     }),
-    execute: async ({ about, from, to }) => {
-      const { hits, scanned, ms } = await recall({
-        question: about,
+    execute: async ({ question, from, to }) => {
+      const { hits, route, timings, ms } = await recall({
+        question,
         from: from ? Date.parse(from) || undefined : undefined,
         to: to ? Date.parse(to) || undefined : undefined,
       });
-      console.log(`recall "${about}": ${hits.length} hits from ${scanned} exchanges in ${ms}ms`);
-      if (hits.length === 0) return `Nothing found about ${about} in past conversations (searched ${scanned} exchanges).`;
+      console.log(`recall [${route}] "${question}": ${hits.length} hits in ${ms}ms ${JSON.stringify(timings)}`);
+      if (hits.length === 0) return 'Nothing found about that in past conversations.';
       const lines = hits.map(
-        ({ doc }) => `[${formatWhen(doc.endedAt)}] User: ${doc.userText} | Assistant: ${doc.agentText}`,
+        ({ doc }) => `[${formatWhen(doc.endedAt)}] User: ${doc.userText} | Assistant: ${doc.agentText.slice(0, 300)}`,
       );
-      return `Found ${hits.length} past exchanges about ${about}, most relevant first:\n${lines.join('\n')}\nAnswer from these, saying when it was.`;
+      return (
+        `Past messages, most relevant first:\n${lines.join('\n')}\n` +
+        'Answer from these, saying when it was. If none of them answers the question, say you do not remember.'
+      );
     },
   });
 

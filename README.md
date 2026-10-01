@@ -144,19 +144,27 @@ Notes:
 
 Every exchange (the user's turn(s) + the agent's reply) is indexed while the conversation
 happens, by a Temporal activity scheduled from the room workflow (`🧠 remember: “…”` rows on
-its timeline; `apps/livekit-temporal/src/activities.ts`, `memory.ts`):
+its timeline; `apps/livekit-temporal/src/activities.ts`, `memory.ts`). Laya categorises it
+(topic from a fixed taxonomy, has-a-task) and OpenSearch stores it with exact times.
 
-- Laya categorises it in one call: topic from a fixed taxonomy (`work`, `personal`, `travel`,
-  `health`, `money`, `tech`, `smalltalk`) and whether it holds a task or commitment
-- OpenSearch stores it with exact times (`startedAt`, `endedAt`), room, participants, text
+The agent's `recall` tool runs the pipeline chosen by the LongMemEval benchmark
+([benchmarks/longmemeval/README.md](benchmarks/longmemeval/README.md)):
 
-The agent's `recall` tool answers "what did we say about…": OpenSearch narrows by time range
-and keywords (BM25), then **every candidate is scored in parallel by Laya** (`/v1/scan`,
-batched on the GPU: ~0.5ms per exchange warm, 1,000 exchanges ≈ 0.5s), and the top hits come
-back with when they were said. No embeddings anywhere. Rooms from before indexing existed can
-be backfilled from their Temporal transcripts:
-`npm run backfill-memory -w livekit-temporal -- --skip-users <test identities>` (idempotent). Measured: 2 hits from 3 exchanges in
-246ms. Retrieval accuracy isn't evaluated yet.
+```
+question ─▶ Laya: asks for the user's preferences? (~5 ms)
+   no  ─▶ BM25 over the user's words (time range filter) ─▶ top 20 ─▶ MiniLM cross-encoder re-rank ─▶ top 5   (~60 ms)
+   yes ─▶ LLM query expansion ─▶ BM25 (question + expansion) ─▶ top 5                                       (~450 ms)
+```
+
+On a LongMemEval_M-based library (632 sessions, 3,407 exchanges, 100 questions) the evidence
+session is in the top 5 for 86% of questions and first for 79%; p50 62 ms. Weakest: preference
+questions (0.44).
+
+Try it by voice at scale: `npm run load-library -w livekit-temporal` loads that library as
+your past (dates shifted so it ends today) and writes the questions with expected answers to
+`data/benchmarks/longmemeval/library-questions.md`. Your own exchanges stay in the index; the
+library is the room `longmemeval-library`. Rooms from before indexing existed can be
+backfilled from Temporal: `npm run backfill-memory -w livekit-temporal`.
 
 ## Tools: risk tiers, approval and audit
 

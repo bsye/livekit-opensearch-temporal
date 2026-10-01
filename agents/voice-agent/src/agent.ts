@@ -15,9 +15,8 @@ import {
 } from '@livekit/agents';
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
-import type { SignalDefinition } from '@temporalio/common';
 import { connectTemporal, signalRoom } from 'livekit-temporal/client';
-import { agentMetrics, transcript, type AgentMetric } from 'livekit-temporal/shared';
+import type { AgentMetric, RoomSignal } from 'livekit-temporal/shared';
 
 const INSTRUCTIONS = `You are a helpful voice assistant running fully on local models.
 Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.`;
@@ -83,19 +82,20 @@ export default defineAgent({
 
     const room = { sid: await ctx.room.getSid(), name: ctx.room.name };
     const agentIdentity = ctx.room.localParticipant?.identity ?? 'agent';
-    const report = <T>(signal: SignalDefinition<[T]>, arg: T) =>
-      signalRoom(temporal, room, signal, arg).catch((err) =>
-        console.error(`temporal signal ${signal.name} failed`, err),
-      );
+    const report = (signal: RoomSignal) =>
+      signalRoom(temporal, room, signal).catch((err) => console.error(`temporal ${signal.type} signal failed`, err));
 
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, ({ item, createdAt }) => {
       if (item.type !== 'message' || !item.textContent) return;
-      report(transcript, {
-        role: item.role,
-        text: item.textContent,
-        participant: item.role === 'assistant' ? agentIdentity : (userIdentity(ctx) ?? 'user'),
-        at: createdAt,
-        interrupted: item.interrupted || undefined,
+      report({
+        type: 'transcript',
+        data: {
+          role: item.role,
+          text: item.textContent,
+          participant: item.role === 'assistant' ? agentIdentity : (userIdentity(ctx) ?? 'user'),
+          at: createdAt,
+          interrupted: item.interrupted || undefined,
+        },
       });
     });
 
@@ -109,7 +109,7 @@ export default defineAgent({
       }
       metrics.logMetrics(m);
       const metric = toAgentMetric(m, createdAt);
-      if (metric) report(agentMetrics, { ...metric, participant: agentIdentity });
+      if (metric) report({ type: 'agentMetrics', data: { ...metric, participant: agentIdentity } });
     });
 
     // Voice-to-voice latency: user stops speaking → agent starts speaking. VAD only reports
@@ -123,7 +123,10 @@ export default defineAgent({
       const durationMs = createdAt - userStoppedAt + VAD_SILENCE_MS;
       userStoppedAt = undefined;
       console.log(`voice-to-voice latency: ${durationMs}ms`);
-      report(agentMetrics, { type: 'turn_latency', at: createdAt, durationMs, participant: agentIdentity });
+      report({
+        type: 'agentMetrics',
+        data: { type: 'turn_latency', at: createdAt, durationMs, participant: agentIdentity },
+      });
     });
 
     session.generateReply({ instructions: 'Greet the user in one short sentence.' });

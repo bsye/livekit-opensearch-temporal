@@ -59,6 +59,10 @@ workflow per room session:
   📤 egress, ☎️ SIP. It holds that actor's events, transcript lines and (agents) metrics;
   query `participantState`. Temporal colours events by type, so lanes and labels are how
   actors are told apart.
+- signals are *named* after who did what (`👤 dalbi · track_published (AUDIO)`,
+  `🤖 agent-…: “The capital of France is Paris”`, `🤖 agent-… · ⏱ voice-to-voice 1500ms`)
+  because the timeline labels signals by name; the payload is a typed `RoomSignal` envelope,
+  accepted via the workflows' default signal handler (`signalLabel` in `shared.ts`)
 
 ```sh
 cd apps/livekit-temporal && npm install

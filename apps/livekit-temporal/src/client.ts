@@ -1,7 +1,7 @@
 // Temporal client helpers shared by the translator and the agents (not usable in workflows).
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import { WorkflowIdReusePolicy, type SignalDefinition } from '@temporalio/common';
-import { RoomName, TASK_QUEUE } from './shared.js';
+import { WorkflowIdReusePolicy } from '@temporalio/common';
+import { RoomName, signalLabel, TASK_QUEUE, type RoomSignal } from './shared.js';
 import { roomSession } from './workflows.js';
 
 export async function connectTemporal(): Promise<Client> {
@@ -13,21 +13,21 @@ export async function connectTemporal(): Promise<Client> {
 
 /**
  * Signal the RoomSession workflow for a room session, starting it if needed
- * (webhooks and agents race, so whoever arrives first starts it).
+ * (webhooks and agents race, so whoever arrives first starts it). The signal is named after
+ * what happened and who did it (signalLabel), so the Temporal UI timeline is readable.
  * Returns false when the session already closed and the signal was dropped.
  */
-export async function signalRoom<T>(
+export async function signalRoom(
   client: Client,
   room: { sid: string; name?: string },
-  signal: SignalDefinition<[T]>,
-  arg: T,
+  signal: RoomSignal,
 ): Promise<boolean> {
   try {
     await client.workflow.signalWithStart(roomSession, {
       workflowId: room.sid, // room names get reused, sids are unique per session
       taskQueue: TASK_QUEUE,
-      signal,
-      signalArgs: [arg],
+      signal: signalLabel(signal),
+      signalArgs: [signal],
       // a closed session must not be restarted by a late signal
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
       typedSearchAttributes: room.name ? [{ key: RoomName, value: room.name }] : [],

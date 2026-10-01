@@ -4,11 +4,14 @@
 import http from 'node:http';
 import { WebhookReceiver } from 'livekit-server-sdk';
 import { connectTemporal, signalRoom } from './client.js';
-import { livekitEvent, type LiveKitEvent } from './shared.js';
+import type { LiveKitEvent } from './shared.js';
 
 const port = Number(process.env.TRANSLATOR_PORT ?? 3100);
 const receiver = new WebhookReceiver(required('LIVEKIT_API_KEY'), required('LIVEKIT_API_SECRET'));
 const client = await connectTemporal();
+// LiveKit only sends the participant kind (AGENT, SIP, …) on some events; remember it per
+// participant sid so every label for that participant gets the right icon.
+const participantKinds = new Map<string, string>();
 
 http
   .createServer(async (req, res) => {
@@ -24,6 +27,13 @@ http
       return reply(res, 401, 'invalid webhook');
     }
 
+    if (event.participant) {
+      const { sid, kind } = event.participant;
+      if (kind) participantKinds.set(sid, kind);
+      else event.participant.kind = participantKinds.get(sid);
+      if (event.event === 'participant_left') participantKinds.delete(sid);
+    }
+
     const roomSid = event.room?.sid ?? event.egressInfo?.roomId;
     const roomName = event.room?.name ?? event.egressInfo?.roomName ?? event.ingressInfo?.roomName;
     if (!roomSid) {
@@ -32,7 +42,7 @@ http
     }
 
     try {
-      if (!(await signalRoom(client, { sid: roomSid, name: roomName }, livekitEvent, event))) {
+      if (!(await signalRoom(client, { sid: roomSid, name: roomName }, { type: 'livekitEvent', data: event }))) {
         console.warn(`${event.event} → ${roomSid}: session already closed, dropped`);
         return reply(res, 200, 'session closed');
       }

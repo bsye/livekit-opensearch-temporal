@@ -1,15 +1,16 @@
 import {
   condition,
   patched,
+  setDefaultSignalHandler,
   setHandler,
   sleep,
   startChild,
   upsertSearchAttributes,
   workflowInfo,
   type ChildWorkflowHandle,
-  type SignalDefinition,
 } from '@temporalio/workflow';
 import {
+  actorIcon,
   agentMetrics,
   livekitEvent,
   ParticipantIdentities,
@@ -19,6 +20,7 @@ import {
   transcript,
   type LiveKitEvent,
   type ParticipantSessionState,
+  type RoomSignal,
   type RoomState,
 } from './shared.js';
 
@@ -33,10 +35,14 @@ const MAX_SESSION = '24 hours';
  * One workflow per LiveKit room session (workflow id = room sid). Keeps the combined room
  * state and starts a participantSession child per participant, so each actor gets its own
  * labelled lane in the Temporal UI timeline.
+ *
+ * Signals arrive under human-readable names (signalLabel) with a RoomSignal payload, and are
+ * accepted through the default signal handler; the fixed-name handlers serve older senders.
  */
 export async function roomSession(): Promise<RoomState & { endReason: string }> {
-  // Rooms started before participant lanes existed replay without them
+  // Rooms started before these features existed replay without them
   const withLanes = patched('participant-lanes');
+  const labelled = patched('labelled-signals');
   const state: RoomState = {
     participants: {},
     egress: {},
@@ -46,33 +52,50 @@ export async function roomSession(): Promise<RoomState & { endReason: string }> 
     duplicateCount: 0,
   };
   const seen = new Set<string>();
-  const lanes = new ParticipantLanes(() => state.name);
+  const lanes = new ParticipantLanes(() => state.name, labelled);
   let finished = false;
 
-  setHandler(livekitEvent, (e) => {
-    // LiveKit may deliver a webhook more than once
-    if (seen.has(e.id)) {
-      state.duplicateCount++;
-      return;
+  // label = the signal name, forwarded unchanged so the participant lane shows the same text
+  const onSignal = (signal: RoomSignal, label: string) => {
+    switch (signal.type) {
+      case 'livekitEvent': {
+        const e = signal.data;
+        // LiveKit may deliver a webhook more than once
+        if (seen.has(e.id)) {
+          state.duplicateCount++;
+          return;
+        }
+        seen.add(e.id);
+        state.eventCount++;
+        apply(state, e);
+        if (withLanes && e.participant) lanes.forward(e.participant.identity, e.participant.kind, signal, label);
+        if (e.event === 'room_finished') finished = true;
+        break;
+      }
+      case 'transcript':
+        state.transcript.push(signal.data);
+        if (withLanes) lanes.forward(signal.data.participant, undefined, signal, label);
+        break;
+      case 'agentMetrics':
+        state.metrics.push(signal.data);
+        if (withLanes && signal.data.participant) lanes.forward(signal.data.participant, 'AGENT', signal, label);
+        break;
     }
-    seen.add(e.id);
-    state.eventCount++;
-    apply(state, e);
-    if (withLanes && e.participant) lanes.forward(e.participant.identity, e.participant.kind, livekitEvent, e);
-    if (e.event === 'room_finished') finished = true;
+  };
+  setDefaultSignalHandler((name, payload) => {
+    if (isRoomSignal(payload)) onSignal(payload, name);
   });
-  setHandler(transcript, (entry) => {
-    state.transcript.push(entry);
-    if (withLanes) lanes.forward(entry.participant, undefined, transcript, entry);
-  });
-  setHandler(agentMetrics, (metric) => {
-    state.metrics.push(metric);
-    if (withLanes && metric.participant) lanes.forward(metric.participant, 'AGENT', agentMetrics, metric);
-  });
+  setHandler(livekitEvent, (data) => onSignal({ type: 'livekitEvent', data }, 'livekitEvent'));
+  setHandler(transcript, (data) => onSignal({ type: 'transcript', data }, 'transcript'));
+  setHandler(agentMetrics, (data) => onSignal({ type: 'agentMetrics', data }, 'agentMetrics'));
   setHandler(roomState, () => state);
 
-  const roomFinished = await condition(() => finished, MAX_SESSION);
-  if (roomFinished) await sleep(LATE_EVENT_GRACE);
+  const roomFinished = labelled
+    ? await condition(() => finished, MAX_SESSION, { summary: '⏳ waiting for room_finished (24h max)' })
+    : await condition(() => finished, MAX_SESSION);
+  if (roomFinished) {
+    await sleep(LATE_EVENT_GRACE, labelled ? { summary: '⏳ grace period for late webhooks' } : undefined);
+  }
   return { ...state, endReason: roomFinished ? 'room_finished' : 'timeout' };
 }
 
@@ -82,40 +105,61 @@ export async function participantSession(init: {
   identity: string;
   kind?: string;
 }): Promise<ParticipantSessionState & { endReason: string }> {
+  const labelled = patched('labelled-signals');
   const state: ParticipantSessionState = { ...init, sid: '', tracks: {}, transcript: [], metrics: [] };
   let left = false;
 
-  setHandler(livekitEvent, (e) => {
-    if (e.participant) {
-      state.sid = e.participant.sid;
-      state.kind = e.participant.kind ?? state.kind;
-    }
-    switch (e.event) {
-      case 'participant_joined':
-        state.joinedAt = e.createdAt;
-        break;
-      case 'participant_left':
-      case 'participant_connection_aborted':
-        state.leftAt = e.createdAt;
-        left = true;
-        break;
-      case 'track_published':
-      case 'track_unpublished': {
-        if (!e.track) break;
-        const t = (state.tracks[e.track.sid] ??= { sid: e.track.sid });
-        Object.assign(t, { type: e.track.type, source: e.track.source, mimeType: e.track.mimeType });
-        if (e.event === 'track_published') t.publishedAt = e.createdAt;
-        else t.unpublishedAt = e.createdAt;
+  const onSignal = (signal: RoomSignal) => {
+    switch (signal.type) {
+      case 'livekitEvent': {
+        const e = signal.data;
+        if (e.participant) {
+          state.sid = e.participant.sid;
+          state.kind = e.participant.kind ?? state.kind;
+        }
+        switch (e.event) {
+          case 'participant_joined':
+            state.joinedAt = e.createdAt;
+            break;
+          case 'participant_left':
+          case 'participant_connection_aborted':
+            state.leftAt = e.createdAt;
+            left = true;
+            break;
+          case 'track_published':
+          case 'track_unpublished': {
+            if (!e.track) break;
+            const t = (state.tracks[e.track.sid] ??= { sid: e.track.sid });
+            Object.assign(t, { type: e.track.type, source: e.track.source, mimeType: e.track.mimeType });
+            if (e.event === 'track_published') t.publishedAt = e.createdAt;
+            else t.unpublishedAt = e.createdAt;
+            break;
+          }
+        }
         break;
       }
+      case 'transcript':
+        state.transcript.push(signal.data);
+        break;
+      case 'agentMetrics':
+        state.metrics.push(signal.data);
+        break;
     }
+  };
+  setDefaultSignalHandler((_name, payload) => {
+    if (isRoomSignal(payload)) onSignal(payload);
   });
-  setHandler(transcript, (entry) => void state.transcript.push(entry));
-  setHandler(agentMetrics, (metric) => void state.metrics.push(metric));
+  setHandler(livekitEvent, (data) => onSignal({ type: 'livekitEvent', data }));
+  setHandler(transcript, (data) => onSignal({ type: 'transcript', data }));
+  setHandler(agentMetrics, (data) => onSignal({ type: 'agentMetrics', data }));
   setHandler(participantState, () => state);
 
-  const hasLeft = await condition(() => left, MAX_SESSION);
-  if (hasLeft) await sleep(PARTICIPANT_LATE_EVENT_GRACE);
+  const hasLeft = labelled
+    ? await condition(() => left, MAX_SESSION, { summary: '⏳ in the room (24h max)' })
+    : await condition(() => left, MAX_SESSION);
+  if (hasLeft) {
+    await sleep(PARTICIPANT_LATE_EVENT_GRACE, labelled ? { summary: '⏳ grace period for late events' } : undefined);
+  }
   return { ...state, endReason: hasLeft ? 'left' : 'timeout' };
 }
 
@@ -126,13 +170,18 @@ export async function participantSession(init: {
 class ParticipantLanes {
   private lanes = new Map<string, Promise<ChildWorkflowHandle<typeof participantSession> | undefined>>();
 
-  constructor(private roomName: () => string | undefined) {}
+  constructor(
+    private roomName: () => string | undefined,
+    private labelled: boolean,
+  ) {}
 
-  forward<T>(identity: string, kind: string | undefined, signal: SignalDefinition<[T]>, arg: T): void {
+  forward(identity: string, kind: string | undefined, signal: RoomSignal, label: string): void {
     const previous = this.lanes.get(identity) ?? this.start(identity, kind);
     const next = previous.then(async (child) => {
+      // Rooms started before labelled signals forward under the fixed names
+      const sent = this.labelled ? child?.signal(label, signal) : child?.signal(signal.type, signal.data);
       // A lane that already completed (late event after its grace period) just drops the signal
-      await child?.signal(signal, arg).catch(() => undefined);
+      await sent?.catch(() => undefined);
       return child;
     });
     this.lanes.set(identity, next);
@@ -150,20 +199,9 @@ class ParticipantLanes {
   }
 }
 
-/** Timeline label prefix per LiveKit participant kind (protobuf JSON enum names). */
-function actorIcon(kind: string | undefined): string {
-  switch (kind) {
-    case 'AGENT':
-      return '🤖';
-    case 'INGRESS':
-      return '📥';
-    case 'EGRESS':
-      return '📤';
-    case 'SIP':
-      return '☎️';
-    default:
-      return '👤';
-  }
+function isRoomSignal(payload: unknown): payload is RoomSignal {
+  const type = (payload as RoomSignal | undefined)?.type;
+  return type === 'livekitEvent' || type === 'transcript' || type === 'agentMetrics';
 }
 
 function apply(state: RoomState, e: LiveKitEvent): void {

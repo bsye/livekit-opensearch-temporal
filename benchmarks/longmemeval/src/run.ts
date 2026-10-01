@@ -48,13 +48,13 @@ import {
 const OPENSEARCH = process.env.OPENSEARCH_URL ?? 'http://localhost:9201';
 const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
 const DATA = new URL('../../../data/benchmarks/longmemeval/', import.meta.url);
-const RERANK_DEPTH = 50;
+const RERANK_DEPTH = Number(process.argv.includes('--rerank-depth') ? process.argv[process.argv.indexOf('--rerank-depth') + 1] : 50);
 const ALL_METHODS = [
   'contriever', 'bm25-paper', 'bm25', 'bm25+qe', 'rm3',
   'dense-qwen3', 'rrf-bm25+qwen3', 'rrf-bm25qe+qwen3',
   'dense-nomic', 'rrf-bm25+nomic', 'rrf-bm25qe+nomic',
   'bm25+pref', 'bm25+qe+pref', 'sparse', 'bm25-fuzzy', 'laya', 'bm25+laya',
-  'minilm:bm25+qe', 'bge:bm25+qe', 'minilm:rrf-bm25qe+qwen3', 'bge:rrf-bm25qe+qwen3',
+  'minilm:bm25', 'minilm:bm25+qe', 'bge:bm25+qe', 'minilm:rrf-bm25qe+qwen3', 'bge:rrf-bm25qe+qwen3',
   'minilm:rrf-bm25qe+nomic', 'bge:rrf-bm25qe+nomic',
 ] as const;
 // fixed before running, not tuned on the test questions

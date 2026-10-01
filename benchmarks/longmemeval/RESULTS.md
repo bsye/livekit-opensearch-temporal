@@ -138,3 +138,14 @@ Findings:
 - The 22M MiniLM re-ranker gets ~90% of the 568M bge's gain at ~1/15 of the latency.
 - RM3 pseudo-relevance feedback hurts on conversational turns.
 - Laya as a router (re-rank or not) recovers most of the preference loss and lifts every metric.
+
+## Speed variants: MiniLM re-ranking with and without query expansion, depth 50 / 20 / 10
+
+| retriever | depth | turn R_all@5 | turn R_any@5 | top-1 | NDCG@10 | preference | p50 ms |
+|---|---|---|---|---|---|---|---|
+| minilm:bm25 | 50 | 0.671 | 0.876 | 0.644 | 0.731 | 0.433 | 125 |
+| minilm:bm25 | 20 | 0.652 | 0.862 | 0.652 | 0.716 | 0.433 | 68 |
+| minilm:bm25 | 10 | 0.616 | 0.847 | 0.654 | 0.693 | 0.467 | 46 |
+| minilm:bm25+qe | 50 | 0.690 | 0.893 | 0.649 | 0.749 | 0.467 | 121 + LLM |
+| minilm:bm25+qe | 20 | 0.680 | 0.874 | 0.647 | 0.735 | 0.467 | 66 + LLM |
+| minilm:bm25+qe | 10 | 0.671 | 0.871 | 0.644 | 0.731 | 0.567 | 45 + LLM |

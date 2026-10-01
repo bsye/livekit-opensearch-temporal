@@ -1,0 +1,14 @@
+{
+  "name": "router-bench",
+  "private": true,
+  "type": "module",
+  "description": "Can Laya route each user turn: past (memory recall) / action (tools) / chat?",
+  "scripts": {
+    "bench": "node --env-file=../../.env --import tsx src/run.ts",
+    "typecheck": "tsc --noEmit",
+    "gate": "node --env-file=../../.env --import tsx src/gate.ts"
+  },
+  "dependencies": {
+    "livekit-temporal": "*"
+  }
+}

@@ -153,7 +153,9 @@ its timeline; `apps/livekit-temporal/src/activities.ts`, `memory.ts`):
 The agent's `recall` tool answers "what did we say about…": OpenSearch narrows by time range
 and keywords (BM25), then **every candidate is scored in parallel by Laya** (`/v1/scan`,
 batched on the GPU: ~0.5ms per exchange warm, 1,000 exchanges ≈ 0.5s), and the top hits come
-back with when they were said. No embeddings anywhere. Measured: 2 hits from 3 exchanges in
+back with when they were said. No embeddings anywhere. Rooms from before indexing existed can
+be backfilled from their Temporal transcripts:
+`npm run backfill-memory -w livekit-temporal -- --skip-users <test identities>` (idempotent). Measured: 2 hits from 3 exchanges in
 246ms. Retrieval accuracy isn't evaluated yet.
 
 ## Tools: risk tiers, approval and audit

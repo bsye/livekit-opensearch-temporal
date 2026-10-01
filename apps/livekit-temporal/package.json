@@ -6,7 +6,8 @@
   "scripts": {
     "translator": "node --env-file=../../.env --import tsx src/translator.ts",
     "worker": "node --env-file=../../.env --import tsx src/worker.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backfill-memory": "node --env-file=../../.env --import tsx src/backfill-memory.ts"
   },
   "dependencies": {
     "@temporalio/client": "^1.24.0",

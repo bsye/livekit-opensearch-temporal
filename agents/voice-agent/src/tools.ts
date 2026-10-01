@@ -19,6 +19,7 @@ export interface ToolDeps {
   agent: () => string; // the agent's identity
   auditor: ActionAuditor;
   report: (decision: GateDecision) => void;
+  onRecall: () => void; // marks the next agent reply as answered from memory
 }
 
 export function createTools(deps: ToolDeps) {
@@ -96,19 +97,24 @@ export function createTools(deps: ToolDeps) {
       to: z.string().optional().describe('End of the time range, ISO date/time, only if the user gave one'),
     }),
     execute: async ({ question, from, to }) => {
+      deps.onRecall();
       const { hits, route, timings, ms } = await recall({
         question,
         from: from ? Date.parse(from) || undefined : undefined,
         to: to ? Date.parse(to) || undefined : undefined,
+        excludeRoomSid: deps.room().sid,
       });
       console.log(`recall [${route}] "${question}": ${hits.length} hits in ${ms}ms ${JSON.stringify(timings)}`);
       if (hits.length === 0) return 'Nothing found about that in past conversations.';
-      const lines = hits.map(
-        ({ doc }) => `[${formatWhen(doc.endedAt)}] User: ${doc.userText} | Assistant: ${doc.agentText.slice(0, 300)}`,
-      );
+      // chronological, so facts that changed over time read in order
+      const lines = [...hits]
+        .sort((a, b) => a.doc.endedAt - b.doc.endedAt)
+        .map(({ doc }) => `[${formatWhen(doc.endedAt)}] User: ${doc.userText} | Assistant: ${doc.agentText.slice(0, 300)}`);
       return (
-        `Past messages, most relevant first:\n${lines.join('\n')}\n` +
-        'Answer from these, saying when it was. If none of them answers the question, say you do not remember.'
+        `Relevant past messages, oldest first:\n${lines.join('\n')}\n` +
+        'Answer from these, saying when it was. If the user said different things at different times ' +
+        '(a number, a plan, a preference changed), the most recent statement is the current one. ' +
+        'If none of them answers the question, say you do not remember.'
       );
     },
   });

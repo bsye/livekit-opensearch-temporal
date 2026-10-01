@@ -53,6 +53,7 @@ export interface TranscriptEntry {
   participant: string; // identity of the speaker (the agent's own identity for assistant turns)
   at: number; // unix ms
   interrupted?: boolean;
+  fromMemory?: boolean; // assistant reply produced after a memory recall (not new evidence)
 }
 
 /** One pipeline stage measurement from the agent (STT, end-of-utterance, LLM, TTS). */

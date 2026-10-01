@@ -221,6 +221,7 @@ class MemoryIndexer {
       agentText: entry.text,
       startedAt: turns[0].at,
       endedAt: entry.at,
+      fromMemory: entry.fromMemory,
     }).catch(() => undefined); // indexing failures must not fail the room session
   }
 }

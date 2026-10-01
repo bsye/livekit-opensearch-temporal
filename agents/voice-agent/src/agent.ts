@@ -28,7 +28,9 @@ import { createTools } from './tools.js';
 const instructions = (now: Date) => `You are a helpful voice assistant running fully on local models.
 Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.
 Use tools only when the user asks for that action. After a tool runs, tell the user what it did.
-When the user asks about something you talked about before, use recall.
+Whenever the user asks about their own life, past, plans, purchases, people they know, or anything they
+told you before, call recall first, every time, even if you searched earlier in this conversation.
+Never say you have no information about the user's past without calling recall.
 If the user corrects a reminder or says undo, cancel it (and set the corrected one).
 The current local time is ${now.toTimeString().slice(0, 5)}, ${now.toDateString()}.`;
 
@@ -102,6 +104,7 @@ export default defineAgent({
     let lastUser = 'user';
     const currentUser = () => (lastUser = userIdentity(ctx) ?? lastUser);
     const reportDecision = (decision: GateDecision) => report({ type: 'gate', data: decision });
+    let answeringFromMemory = false;
     const tools = createTools({
       temporal,
       room: () => room,
@@ -109,6 +112,7 @@ export default defineAgent({
       agent: () => agentIdentity,
       auditor: new ActionAuditor(env('LAYA_BASE_URL'), () => agentIdentity, recentUserText, reportDecision),
       report: reportDecision,
+      onRecall: () => (answeringFromMemory = true),
     });
 
     await session.start({
@@ -138,8 +142,10 @@ export default defineAgent({
           participant: item.role === 'assistant' ? agentIdentity : currentUser(),
           at: createdAt,
           interrupted: item.interrupted || undefined,
+          fromMemory: (item.role === 'assistant' && answeringFromMemory) || undefined,
         },
       });
+      if (item.role === 'assistant') answeringFromMemory = false;
     });
 
     // The TTS StreamAdapter re-emits the wrapped TTS's metrics, so the same request arrives twice

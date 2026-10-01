@@ -31,6 +31,9 @@ export interface Exchange {
   agentText: string;
   startedAt: number; // unix ms, first user turn
   endedAt: number; // unix ms, agent reply
+  // the agent answered from memory: asking about the past isn't new evidence, and a wrong answer
+  // must not be recalled later as if the user had said it
+  fromMemory?: boolean;
 }
 
 export interface MemoryDoc extends Exchange {
@@ -60,6 +63,7 @@ const MAPPING = {
       topic: { type: 'keyword' },
       topicConfidence: { type: 'float' },
       hasTask: { type: 'boolean' },
+      fromMemory: { type: 'boolean' },
     },
   },
 };
@@ -130,6 +134,7 @@ export interface RecallQuery {
   from?: number; // unix ms
   to?: number; // unix ms
   limit?: number; // hits returned (default 5)
+  excludeRoomSid?: string; // the current conversation: not "the past" yet
 }
 
 export interface RecallResult {
@@ -155,6 +160,8 @@ export async function recall(q: RecallQuery): Promise<RecallResult> {
   await ensureIndex();
   const limit = q.limit ?? 5;
   const filter = [{ range: { endedAt: { gte: q.from ?? 0, lte: q.to ?? Date.now() } } }];
+  const must_not: unknown[] = [{ term: { fromMemory: true } }];
+  if (q.excludeRoomSid) must_not.push({ term: { roomSid: q.excludeRoomSid } });
 
   let t = Date.now();
   const preference = await isPreferenceQuestion(q.question);
@@ -170,6 +177,7 @@ export async function recall(q: RecallQuery): Promise<RecallResult> {
       query: {
         bool: {
           filter,
+          must_not,
           should: [
             { match: { userText: q.question } },
             { match: { userText: { query: expansion, boost: EXPANSION_WEIGHT } } },
@@ -183,7 +191,7 @@ export async function recall(q: RecallQuery): Promise<RecallResult> {
   }
 
   t = Date.now();
-  const candidates = await search({ size: RERANK_DEPTH, query: { bool: { filter, must: [{ match: { userText: q.question } }] } } });
+  const candidates = await search({ size: RERANK_DEPTH, query: { bool: { filter, must_not, must: [{ match: { userText: q.question } }] } } });
   lap('bm25', t);
   t = Date.now();
   const scores = candidates.length ? await rerankScores(q.question, candidates.map((c) => c._source.userText)) : [];

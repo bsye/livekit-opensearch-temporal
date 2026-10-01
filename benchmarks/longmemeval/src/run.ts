@@ -7,6 +7,10 @@
 //   contriever  facebook/contriever (dense embeddings, the paper's dense baseline; benchmark only)
 //   bm25-paper  the paper's own BM25 (rank_bm25 BM25Okapi on space-split text), in-process
 //   bm25        OpenSearch BM25 (english analyzer: lowercasing, stemming, stopwords)
+//   bm25+qe     BM25 over the question plus LLM query-expansion terms (weight 0.5)
+//   bm25+pref   BM25, plus Laya preference tags when Laya judges the question to ask for preferences
+//   bm25+qe+pref both of the above
+//   sparse      learned sparse retrieval (OpenSearch doc-only neural sparse model, rank_features)
 //   bm25-fuzzy  BM25 with fuzzy term matching (tolerates misspellings / speech-to-text errors)
 //   laya        parallel Laya scan: every document of the question's history scored on the GPU
 //   bm25+laya   BM25 top 50 re-ordered by Laya, then the rest of the BM25 ranking
@@ -19,6 +23,9 @@ import { fileURLToPath } from 'node:url';
 import StreamArray from 'stream-json/streamers/StreamArray.js';
 import { bm25OkapiRanking } from './bm25okapi.js';
 import { contrieverRanking, loadContriever } from './contriever.js';
+import { QueryExpander } from './expansion.js';
+import { encodeDocs, loadSparse, queryWeights } from './sparse.js';
+import { PreferenceTags } from './preference.js';
 import {
   buildCorpus,
   evaluateRetrieval,
@@ -35,7 +42,11 @@ const OPENSEARCH = process.env.OPENSEARCH_URL ?? 'http://localhost:9201';
 const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
 const DATA = new URL('../../../data/benchmarks/longmemeval/', import.meta.url);
 const RERANK_DEPTH = 50;
-const ALL_METHODS = ['contriever', 'bm25-paper', 'bm25', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
+const ALL_METHODS = ['contriever', 'bm25-paper', 'bm25', 'bm25+qe', 'bm25+pref', 'bm25+qe+pref', 'sparse', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
+// fixed before running, not tuned on the test questions
+const EXPANSION_WEIGHT = 0.5;
+const PREFERENCE_WEIGHT = 0.5; // added to the per-question max-normalised BM25 score
+const PREFERENCE_QUESTION_MIN = 0.5; // Laya P(question asks for preferences) needed to apply the tags
 type Method = (typeof ALL_METHODS)[number];
 
 const arg = (name: string, fallback: string) => {
@@ -54,6 +65,12 @@ mkdirSync(outDir, { recursive: true });
 
 await indexCorpus();
 if (methods.includes('contriever')) await loadContriever();
+if (methods.includes('sparse')) {
+  await loadSparse();
+  await indexSparseCorpus();
+}
+const expander = new QueryExpander(new URL(`${dataset}.expansions.json`, outDir));
+const prefTags = new PreferenceTags(new URL(`${dataset}.preference-tags.json`, outDir));
 
 type Row = {
   question_id: string;
@@ -95,6 +112,7 @@ for await (const q of questions()) {
     console.log(`${evaluatedCount} questions (${rate}s each, laya peak ${layaPeakMb} MB)`);
   }
 }
+prefTags.save();
 console.log(`${evaluatedCount} questions evaluated, ${skipped} excluded (abstention/no-target, as in the official script)`);
 report();
 
@@ -128,6 +146,36 @@ async function evaluate(q: Question): Promise<Row> {
     row.latencyMs.bm25 = bm25Ms;
     row.scanned.bm25 = 0;
   }
+  if (methods.includes('bm25+qe')) {
+    const expansion = await expander.expand(q.question_id, q.question); // LLM time excluded: cached / reported separately
+    t = Date.now();
+    rankings['bm25+qe'] = complete(await bm25Ranking(q, position, false, expansion), corpus.length);
+    row.latencyMs['bm25+qe'] = Date.now() - t;
+    row.scanned['bm25+qe'] = 0;
+  }
+  for (const m of ['bm25+pref', 'bm25+qe+pref'] as const) {
+    if (!methods.includes(m)) continue;
+    const expansion = m === 'bm25+qe+pref' ? await expander.expand(q.question_id, q.question) : undefined;
+    t = Date.now();
+    const scores = await bm25Scores(q, position, expansion);
+    const pq = await prefTags.queryScore(q.question);
+    if (pq >= PREFERENCE_QUESTION_MIN) {
+      const max = Math.max(...scores.values(), 1e-9);
+      const tags = await prefTags.turnScores(corpus.map((d) => d.text));
+      const final = corpus.map((_, i) => (scores.get(i) ?? 0) / max + PREFERENCE_WEIGHT * pq * tags[i]);
+      rankings[m] = byScore(corpus.map((_, i) => i), final);
+    } else {
+      rankings[m] = complete([...scores.keys()], corpus.length);
+    }
+    row.latencyMs[m] = Date.now() - t;
+    row.scanned[m] = pq >= PREFERENCE_QUESTION_MIN ? corpus.length : 0;
+  }
+  if (methods.includes('sparse')) {
+    t = Date.now();
+    rankings.sparse = complete(await sparseRanking(q, position), corpus.length);
+    row.latencyMs.sparse = Date.now() - t;
+    row.scanned.sparse = 0;
+  }
   if (methods.includes('bm25-fuzzy')) {
     t = Date.now();
     rankings['bm25-fuzzy'] = complete(await bm25Ranking(q, position, true), corpus.length);
@@ -154,12 +202,44 @@ async function evaluate(q: Question): Promise<Row> {
   return row;
 }
 
-async function bm25Ranking(q: Question, position: Map<string, number>, fuzzy: boolean): Promise<number[]> {
+async function bm25Ranking(q: Question, position: Map<string, number>, fuzzy: boolean, expansion?: string): Promise<number[]> {
   const match = fuzzy ? { match: { text: { query: q.question, fuzziness: 'AUTO' } } } : { match: { text: q.question } };
+  const should = expansion ? [match, { match: { text: { query: expansion, boost: EXPANSION_WEIGHT } } }] : [match];
   const res = await post(`${OPENSEARCH}/${index}/_search`, {
     size: 10000,
     _source: ['docId'],
-    query: { bool: { filter: [{ term: { qid: q.question_id } }], must: [match] } },
+    query: { bool: { filter: [{ term: { qid: q.question_id } }], should, minimum_should_match: 1 } },
+  });
+  const hits = (res as { hits: { hits: { _source: { docId: string } }[] } }).hits.hits;
+  return hits.map((h) => position.get(h._source.docId)!).filter((i) => i !== undefined);
+}
+
+/** BM25 scores by corpus position, in BM25 rank order (optionally with expansion terms). */
+async function bm25Scores(q: Question, position: Map<string, number>, expansion?: string): Promise<Map<number, number>> {
+  const match = { match: { text: q.question } };
+  const should = expansion ? [match, { match: { text: { query: expansion, boost: EXPANSION_WEIGHT } } }] : [match];
+  const res = await post(`${OPENSEARCH}/${index}/_search`, {
+    size: 10000,
+    _source: ['docId'],
+    query: { bool: { filter: [{ term: { qid: q.question_id } }], should, minimum_should_match: 1 } },
+  });
+  const hits = (res as { hits: { hits: { _score: number; _source: { docId: string } }[] } }).hits.hits;
+  return new Map(hits.filter((h) => position.has(h._source.docId)).map((h) => [position.get(h._source.docId)!, h._score]));
+}
+
+/** Dot product of IDF-weighted query tokens with the documents' rank_features. */
+async function sparseRanking(q: Question, position: Map<string, number>): Promise<number[]> {
+  const weights = queryWeights(q.question);
+  const res = await post(`${OPENSEARCH}/${index}-sparse/_search`, {
+    size: 10000,
+    _source: ['docId'],
+    query: {
+      bool: {
+        filter: [{ term: { qid: q.question_id } }],
+        should: Object.entries(weights).map(([k, w]) => ({ rank_feature: { field: `sparse.${k}`, linear: {}, boost: w } })),
+        minimum_should_match: 1,
+      },
+    },
   });
   const hits = (res as { hits: { hits: { _source: { docId: string } }[] } }).hits.hits;
   return hits.map((h) => position.get(h._source.docId)!).filter((i) => i !== undefined);
@@ -250,6 +330,45 @@ async function indexCorpus(): Promise<void> {
   await fetch(`${OPENSEARCH}/${index}/_refresh`, { method: 'POST' });
   writeFileSync(marker, String(total));
   console.log(`indexed ${total} docs`);
+}
+
+async function indexSparseCorpus(): Promise<void> {
+  const sparseIndex = `${index}-sparse`;
+  const marker = new URL(`${sparseIndex}.indexed`, outDir);
+  const count = (await fetch(`${OPENSEARCH}/${sparseIndex}/_count`).then((r) => (r.ok ? r.json() : { count: -1 }))) as { count: number };
+  if (existsSync(marker) && Number(readFileSync(marker, 'utf8')) === count.count) {
+    return console.log(`index ${sparseIndex} ready (${count.count} docs)`);
+  }
+  console.log(`encoding + indexing sparse vectors into ${sparseIndex} …`);
+  await fetch(`${OPENSEARCH}/${sparseIndex}`, { method: 'DELETE' });
+  await put(`${OPENSEARCH}/${sparseIndex}`, {
+    settings: { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '-1' },
+    mappings: { properties: { qid: { type: 'keyword' }, docId: { type: 'keyword' }, sparse: { type: 'rank_features' } } },
+  });
+  let lines: string[] = [];
+  let total = 0;
+  const flush = async () => {
+    if (!lines.length) return;
+    const res = await fetch(`${OPENSEARCH}/_bulk`, { method: 'POST', headers: { 'content-type': 'application/x-ndjson' }, body: `${lines.join('\n')}\n` });
+    if (((await res.json()) as { errors: boolean }).errors) throw new Error('bulk indexing errors');
+    lines = [];
+  };
+  const startedAt = Date.now();
+  for await (const q of questions()) {
+    const docs = buildCorpus(q, granularity);
+    const vectors = await encodeDocs(docs.map((d) => d.text));
+    docs.forEach((d, i) => {
+      lines.push(JSON.stringify({ index: { _index: sparseIndex } }), `{"qid":${JSON.stringify(q.question_id)},"docId":${JSON.stringify(d.id)},"sparse":${vectors[i]}}`);
+    });
+    total += docs.length;
+    if (lines.length >= 2000) await flush();
+    if (total % 100000 < docs.length) console.log(`  ${total} docs (${((Date.now() - startedAt) / 60000).toFixed(1)} min)`);
+  }
+  await flush();
+  await put(`${OPENSEARCH}/${sparseIndex}/_settings`, { index: { refresh_interval: '1s' } });
+  await fetch(`${OPENSEARCH}/${sparseIndex}/_refresh`, { method: 'POST' });
+  writeFileSync(marker, String(total));
+  console.log(`indexed ${total} sparse docs`);
 }
 
 // --- reporting ---------------------------------------------------------------------------

@@ -80,3 +80,23 @@ session recall_any@5 by question type:
   at ~65x lower latency; dense wins on preference questions (paraphrase, no shared words) and slightly
   on multi-session.
 - Not measured: Stella V5 1.5B (paper: ~+0.07 over Contriever at round level).
+
+## Closing the paraphrase gap without embeddings (LongMemEval_M cleaned, turn granularity)
+
+All settings fixed before running (expansion weight 0.5, preference weight 0.5, question threshold 0.5);
+nothing tuned on the test questions. Gold question types are never used by any method.
+
+| retriever | turn R_all@5 | turn R_any@5 | turn NDCG@10 | session R_any@5 | preference (n=30) | query-time cost |
+|---|---|---|---|---|---|---|
+| contriever (dense baseline) | 0.456 | 0.740 | 0.541 | 0.809 | **0.667** | ~3 s (CPU, cached) |
+| bm25 | 0.556 | 0.800 | 0.630 | 0.823 | 0.333 | ~30 ms |
+| **bm25+qe** (LLM query expansion) | **0.621** | **0.859** | **0.684** | **0.883** | 0.633 | ~30 ms + ~0.5 s LLM |
+| sparse (doc-only learned sparse, rank_features) | 0.573 | 0.816 | 0.655 | 0.845 | 0.400 | ~175 ms (no model at query time) |
+| bm25+pref (Laya preference tags) | 0.556 | 0.795 | 0.628 | 0.821 | 0.300 | ~30 ms |
+| bm25+qe+pref | 0.616 | 0.852 | 0.677 | 0.876 | 0.533 | ~30 ms + LLM |
+
+- Query expansion is the clear win: +0.065 R_all@5, +0.054 NDCG@10 over BM25, preference 0.33 → 0.63
+  (≈ Contriever's 0.67), multi-session 0.92 (Contriever 0.87).
+- Learned sparse helps modestly (+0.017 R_all@5) at 5.4 GB index and ~30 min encoding for 1.2M turns.
+- Laya preference tags hurt: Laya classifies preference *questions* well (83% of them flagged vs 0–5% of
+  other types) but boosting every preference-stating turn pushes irrelevant ones up.

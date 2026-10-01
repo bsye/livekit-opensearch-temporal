@@ -25,3 +25,30 @@ Official protocol (ports of LongMemEval's `eval_utils.py` / `run_retrieval.py`):
 | 0.634 | 0.723 | 0.720 |
 
 The paper does not state whether Recall is recall_any or recall_all; both are reported above.
+
+## LongMemEval_M (cleaned), 419 questions, ~2,400 user turns / ~475 sessions per question
+
+Controlled comparison, same data and protocol. Recall = recall_all (the paper's Recall@k sits
+between our recall_all and recall_any; it does not define which it reports).
+
+| retriever | session R@5 | session NDCG@5 | session R@10 | session NDCG@10 | turn R@5 | turn NDCG@5 | turn R@10 | turn NDCG@10 | p50 ms |
+|---|---|---|---|---|---|---|---|---|---|
+| bm25-paper (exact port of the paper's rank_bm25 BM25Okapi, space-split) | 0.578 | 0.614 | 0.659 | 0.639 | 0.356 | 0.408 | 0.437 | 0.435 | 11–14 |
+| **bm25** (OpenSearch, english analyzer) | **0.745** | **0.779** | **0.828** | **0.803** | **0.556** | **0.598** | **0.654** | **0.630** | 17–23 |
+| bm25-fuzzy | 0.680 | 0.711 | 0.752 | 0.732 | 0.508 | 0.555 | 0.611 | 0.588 | 13–27 |
+| bm25 top-50 → Laya (zero-shot) | – | – | – | – | 0.320 | 0.387 | 0.451 | 0.436 | 120 |
+
+Published (paper Table 9, LongMemEval_M **original** data, K = V):
+
+| retriever | session R@5 / N@5 / R@10 / N@10 | round R@5 / N@5 / R@10 / N@10 |
+|---|---|---|
+| BM25 | 0.634 / 0.516 / 0.710 / 0.540 | 0.472 / 0.352 / 0.538 / 0.372 |
+| Contriever | 0.723 / 0.634 / 0.823 / 0.663 | 0.589 / 0.454 / 0.747 / 0.495 |
+| Stella V5 1.5B | 0.720 / 0.594 / 0.794 / 0.615 | 0.660 / 0.498 / 0.784 / 0.528 |
+
+Findings: tokenisation alone (lowercase, punctuation, stemming, stopwords) lifts BM25 by +0.17
+(session) / +0.20 (turn) R@5 on identical data, more than the +0.09 the paper reports for dense
+retrievers over its BM25. Fuzzy matching hurts on typed text. Zero-shot Laya re-ordering hurts.
+Caveat: our port lands on either side of the paper's BM25 numbers (data version: cleaned vs
+original), so comparisons with the paper's dense rows cross data versions; running a dense
+baseline on the cleaned data is needed to claim parity.

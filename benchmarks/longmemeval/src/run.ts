@@ -4,7 +4,8 @@
 //        [--granularity turn|session] [--methods bm25,bm25-fuzzy,bm25+laya,laya] [--limit N] [--fresh]
 //
 // Retrievers (same corpus, labels and metrics as the official run_retrieval.py):
-//   bm25        OpenSearch BM25 (english analyzer), the paper's lexical baseline
+//   bm25-paper  the paper's own BM25 (rank_bm25 BM25Okapi on space-split text), in-process
+//   bm25        OpenSearch BM25 (english analyzer: lowercasing, stemming, stopwords)
 //   bm25-fuzzy  BM25 with fuzzy term matching (tolerates misspellings / speech-to-text errors)
 //   laya        parallel Laya scan: every document of the question's history scored on the GPU
 //   bm25+laya   BM25 top 50 re-ordered by Laya, then the rest of the BM25 ranking
@@ -15,6 +16,7 @@
 import { createReadStream, appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import StreamArray from 'stream-json/streamers/StreamArray.js';
+import { bm25OkapiRanking } from './bm25okapi.js';
 import {
   buildCorpus,
   evaluateRetrieval,
@@ -31,7 +33,7 @@ const OPENSEARCH = process.env.OPENSEARCH_URL ?? 'http://localhost:9201';
 const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
 const DATA = new URL('../../../data/benchmarks/longmemeval/', import.meta.url);
 const RERANK_DEPTH = 50;
-const ALL_METHODS = ['bm25', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
+const ALL_METHODS = ['bm25-paper', 'bm25', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
 type Method = (typeof ALL_METHODS)[number];
 
 const arg = (name: string, fallback: string) => {
@@ -41,7 +43,7 @@ const arg = (name: string, fallback: string) => {
 const granularity = arg('granularity', 'turn') as Granularity;
 const limit = Number(arg('limit', '0'));
 const dataset = arg('dataset', 'longmemeval_s_cleaned');
-const methods = arg('methods', 'bm25,bm25-fuzzy,laya,bm25+laya').split(',') as Method[];
+const methods = arg('methods', 'bm25-paper,bm25,bm25-fuzzy,laya,bm25+laya').split(',') as Method[];
 for (const m of methods) if (!ALL_METHODS.includes(m)) throw new Error(`unknown method ${m}`);
 const index = `bench-${dataset.replace(/_/g, '-')}-${granularity}`;
 const dataFile = fileURLToPath(new URL(`${dataset}.json`, DATA));
@@ -59,7 +61,9 @@ type Row = {
   corpusSize: number;
   layaPeakMb?: number;
 };
-const progressFile = new URL(`${dataset}-${granularity}.progress.jsonl`, outDir);
+// --tag keeps a separate progress file, e.g. to add a retriever to an already finished run
+const tag = arg('tag', '');
+const progressFile = new URL(`${dataset}-${granularity}${tag ? `-${tag}` : ''}.progress.jsonl`, outDir);
 if (process.argv.includes('--fresh')) rmSync(progressFile, { force: true });
 const rows: Row[] = existsSync(progressFile)
   ? readFileSync(progressFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Row)
@@ -102,6 +106,12 @@ async function evaluate(q: Question): Promise<Row> {
   const rankings: Partial<Record<Method, number[]>> = {};
 
   let t = Date.now();
+  if (methods.includes('bm25-paper')) {
+    rankings['bm25-paper'] = bm25OkapiRanking(corpus.map((d) => d.text), q.question);
+    row.latencyMs['bm25-paper'] = Date.now() - t;
+    row.scanned['bm25-paper'] = 0;
+    t = Date.now();
+  }
   const bm25 = complete(await bm25Ranking(q, position, false), corpus.length);
   const bm25Ms = Date.now() - t;
   if (methods.includes('bm25')) {

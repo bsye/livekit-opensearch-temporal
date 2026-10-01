@@ -100,3 +100,41 @@ nothing tuned on the test questions. Gold question types are never used by any m
 - Learned sparse helps modestly (+0.017 R_all@5) at 5.4 GB index and ~30 min encoding for 1.2M turns.
 - Laya preference tags hurt: Laya classifies preference *questions* well (83% of them flagged vs 0–5% of
   other types) but boosting every preference-stating turn pushes irrelevant ones up.
+
+## Round 2–3: modern embedders, hybrids, RM3, cross-encoder re-ranking (LongMemEval_M cleaned, turn)
+
+Fixed before running: RRF k=60, RM3 Anserini defaults (10 docs, 10 terms, 0.5), re-rank depth 50.
+Dense latency is query time only (document embedding is index-time work). LLM query expansion
+(~0.5 s, cached) is not included in latencies.
+
+| retriever | turn R_all@5 | turn R_any@5 | turn R_any@1 | turn NDCG@10 | session R_any@5 | preference | p50 ms |
+|---|---|---|---|---|---|---|---|
+| bm25 | 0.556 | 0.800 | 0.516 | 0.630 | 0.823 | 0.333 | 31 |
+| rm3 | 0.492 | 0.759 | 0.411 | 0.568 | 0.797 | 0.367 | 31 |
+| bm25+qe | 0.621 | 0.859 | 0.556 | 0.684 | 0.883 | 0.633 | 24 |
+| dense-nomic (v1.5) | 0.520 | 0.800 | 0.489 | 0.599 | 0.823 | 0.433 | 19 |
+| dense-qwen3 (Qwen3-Embedding-0.6B) | 0.547 | 0.833 | 0.516 | 0.628 | 0.864 | 0.600 | 36 |
+| rrf-bm25+qwen3 | 0.601 | 0.866 | 0.532 | 0.681 | 0.895 | 0.600 | 37 |
+| rrf-bm25qe+qwen3 | 0.621 | 0.883 | 0.556 | 0.694 | 0.905 | 0.700 | 37 |
+| minilm:bm25+qe | 0.690 | 0.893 | 0.649 | 0.749 | 0.909 | 0.467 | 160 |
+| bge:bm25+qe | 0.704 | 0.893 | 0.654 | 0.755 | 0.909 | 0.433 | 2292 |
+| minilm:rrf-bm25qe+qwen3 | 0.687 | 0.890 | 0.642 | 0.753 | 0.905 | 0.467 | 253 |
+| bge:rrf-bm25qe+qwen3 | **0.726** | **0.895** | 0.644 | **0.758** | **0.912** | 0.433 | 2333 |
+
+Routing with Laya (skip re-ranking when Laya judges the question to ask for preferences; Laya's
+P(question asks for preferences) >= 0.5, 31 questions flagged; gold types not used):
+
+| routed retriever | turn R_all@5 | turn R_any@5 | turn NDCG@10 | session R_any@5 | preference |
+|---|---|---|---|---|---|
+| laya → minilm:bm25+qe / bm25+qe | 0.699 | 0.900 | 0.756 | 0.916 | 0.567 |
+| laya → bge:bm25+qe / bm25+qe | 0.706 | 0.900 | 0.762 | 0.919 | 0.567 |
+| laya → bge:rrf-bm25qe+qwen3 / rrf-bm25qe+qwen3 | **0.728** | **0.905** | **0.766** | **0.928** | **0.667** |
+
+Findings:
+- A modern embedder alone (Qwen3-0.6B) is roughly BM25-level here (R_all@5 0.547 vs 0.556) and below BM25+qe.
+- Hybrid RRF adds little on top of query expansion (R_any@5 +0.024, R_all@5 ±0).
+- Cross-encoder re-ranking is the largest single gain (+0.07–0.08 R_all@5, R@1 0.56 → 0.65), but hurts
+  preference questions (relevance models trained on MS MARCO don't capture "fits my taste").
+- The 22M MiniLM re-ranker gets ~90% of the 568M bge's gain at ~1/15 of the latency.
+- RM3 pseudo-relevance feedback hurts on conversational turns.
+- Laya as a router (re-rank or not) recovers most of the preference loss and lifts every metric.

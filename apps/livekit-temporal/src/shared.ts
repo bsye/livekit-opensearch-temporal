@@ -70,15 +70,19 @@ export interface AgentMetric {
   completionTokens?: number;
 }
 
-/** An action-gate decision made by an agent before running a tool (agents/voice-agent/src/gate.ts). */
+/**
+ * An approval step or audit for an agent tool call (agents/voice-agent/src/approval.ts, audit.ts).
+ * Kept under the signal type 'gate' so rooms recorded before the rename still replay.
+ */
 export interface GateDecision {
   tool: string;
   args: Record<string, unknown>;
-  // pass: ran without asking · confirm: asked the user first · confirmed/declined: the user's answer
-  decision: 'pass' | 'confirm' | 'confirmed' | 'declined';
+  // confirm: asked the user · confirmed/declined: their answer · audited/flagged: Laya's after-the-fact check
+  // (pass: the earlier gate's approval without asking, kept for old rooms)
+  decision: 'pass' | 'confirm' | 'confirmed' | 'declined' | 'audited' | 'flagged';
   reasons: string[];
   intent?: number; // Laya: P(action matches the request)
-  agreement?: number; // Laya: P(user's reply agrees), for confirmed/declined
+  agreement?: number; // earlier gate only
   latencyMs: number;
   at: number; // unix ms
   participant: string; // the agent's identity
@@ -91,6 +95,15 @@ export interface ReminderInput {
   when: string; // as shown to the user, e.g. "18:00 today"
   roomSid: string;
   participant: string; // who asked for it
+}
+
+/** A (simulated) email sent by the agent's send_email tool after approval. */
+export interface EmailInput {
+  to: string;
+  subject: string;
+  body: string;
+  roomSid: string;
+  requestedBy: string;
 }
 
 export interface RoomState {
@@ -183,7 +196,9 @@ export function signalLabel(s: RoomSignal): string {
     case 'gate': {
       const g = s.data;
       const why = g.reasons.length ? ` (${g.reasons.join('; ')})` : '';
-      return `🛡 ${g.participant} · gate ${g.tool} → ${g.decision}${why}`;
+      if (g.decision === 'audited') return `🔎 ${g.participant} · audit ${g.tool} ok ${g.intent?.toFixed(2)}`;
+      if (g.decision === 'flagged') return `⚠️ ${g.participant} · audit ${g.tool} flagged${why}`;
+      return `🛡 ${g.participant} · approval ${g.tool} → ${g.decision}${why}`;
     }
   }
 }

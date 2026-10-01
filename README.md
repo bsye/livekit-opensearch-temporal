@@ -138,24 +138,29 @@ Notes:
 - Startup warnings about the cloud turn detector and session events are LiveKit Cloud
   features falling back to local equivalents.
 
-## Tools and the action gate
+## Tools: risk tiers, approval and audit
 
-The agent has one tool, `set_reminder(text, time, day)`. Every tool call passes the
-action gate (`agents/voice-agent/src/gate.ts`) before it runs:
+Tools (`agents/voice-agent/src/tools.ts`) are tiered by risk, like the OpenAI Agents SDK's
+`needsApproval` and ChatGPT's "ask before consequential actions":
 
-1. **Intent** — Laya (open-weights decision model, local MLX, ~5–13ms incl. HTTP): does the
-   call match what the user asked? Catches unrelated actions and negations.
-2. **Values** — plain code: every value must match what the user said (hour, AM/PM,
-   today/tomorrow). Laya alone approved "50 euros" → `amount=500` at p=1.00
-   (`services/laya/eval_gate.py`), so exact values are never left to the model.
-3. **Confirm** — if 1 or 2 flag it (or the tool is high-stakes), the agent asks
-   "Just to confirm: …, right?" and Laya reads the reply (agree ≥ 0.75, decline ≤ 0.25).
+| Tier | Tools | Behaviour |
+|---|---|---|
+| Reversible | `set_reminder`, `cancel_reminder` (undo) | runs immediately, reads back what it did |
+| Consequential | `send_email` (simulated) | `needsApproval`: confirmed with the user first |
 
-Each decision is a `gate` signal in the agent's lane (`🛡 agent-… · gate set_reminder →
-pass`), and approved reminders run as durable `reminder` workflows (a timer labelled
-`⏰ call mom @ 18:00 today`). Policy: the model speaks optimistically, but nothing with
-consequences runs unverified. Python is used only for model servers in `services/`; all
-app/API code is TypeScript.
+Approval (`approval.ts`) uses LiveKit primitives: the tool pauses inside its own `execute`,
+runs a small confirmation `AgentTask` through `ctx.foreground()` (spoken verbatim with
+`session.say`, then an `approve`/`reject` tool picked by the LLM), and only continues on
+approval. The LLM can't skip it or claim success early, because the tool is still running.
+
+Laya audits every committed action afterwards (`audit.ts`, off the critical path) and the
+result is a signal in the agent's lane (`🔎 … audit set_reminder ok 0.74`, `⚠️ … flagged`).
+Zero-shot audit scores are noisy (they flag some correct actions); they're for review and for
+collecting labelled data to fine-tune Laya, not for blocking.
+
+Side effects are Temporal workflows: `reminder` (durable timer, cancelled by undo) and
+`sendEmail` (simulated outbox). `services/laya/eval_gate.py` documents why Laya isn't used as
+a blocking gate: it approved "50 euros" → `amount=500` at p=1.00.
 
 ## Differences from the Linux setup
 

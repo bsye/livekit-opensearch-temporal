@@ -1,8 +1,8 @@
 // Temporal client helpers shared by the translator and the agents (not usable in workflows).
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
-import { RoomName, signalLabel, TASK_QUEUE, type ReminderInput, type RoomSignal } from './shared.js';
-import { reminder, roomSession } from './workflows.js';
+import { RoomName, signalLabel, TASK_QUEUE, type EmailInput, type ReminderInput, type RoomSignal } from './shared.js';
+import { reminder, roomSession, sendEmail } from './workflows.js';
 
 export async function connectTemporal(): Promise<Client> {
   return new Client({
@@ -49,5 +49,23 @@ export async function startReminder(client: Client, input: ReminderInput, roomNa
     staticSummary: `⏰ ${input.text} @ ${input.when}`,
     typedSearchAttributes: roomName ? [{ key: RoomName, value: roomName }] : [],
   });
+  return handle.workflowId;
+}
+
+/** Undo for set_reminder: cancels the reminder's timer workflow. */
+export async function cancelReminder(client: Client, workflowId: string): Promise<void> {
+  await client.workflow.getHandle(workflowId).cancel();
+}
+
+/** Record an approved (simulated) email as a workflow, listed under the room's RoomName. */
+export async function recordEmail(client: Client, input: EmailInput, roomName?: string): Promise<string> {
+  const handle = await client.workflow.start(sendEmail, {
+    workflowId: `email-${input.roomSid}-${Date.now()}`,
+    taskQueue: TASK_QUEUE,
+    args: [input],
+    staticSummary: `✉️ to ${input.to}: ${input.subject}`,
+    typedSearchAttributes: roomName ? [{ key: RoomName, value: roomName }] : [],
+  });
+  await handle.result();
   return handle.workflowId;
 }

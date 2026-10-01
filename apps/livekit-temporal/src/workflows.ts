@@ -20,6 +20,7 @@ import {
   transcript,
   type LiveKitEvent,
   type ParticipantSessionState,
+  type EmailInput,
   type ReminderInput,
   type RoomSignal,
   type RoomState,
@@ -177,6 +178,11 @@ export async function reminder(input: ReminderInput): Promise<ReminderInput & { 
   if (wait > 0) await sleep(wait, { summary: `⏰ until ${input.when}` });
   // Delivery (push, call back into the room, …) is a next step; firing is recorded in history
   return { ...input, firedAt: Date.now() };
+}
+
+/** Simulated outbox: records an approved email; a real version would call an email activity. */
+export async function sendEmail(input: EmailInput): Promise<EmailInput & { sentAt: number; simulated: true }> {
+  return { ...input, sentAt: Date.now(), simulated: true };
 }
 
 /**

@@ -10,6 +10,10 @@
 //   bm25+qe     BM25 over the question plus LLM query-expansion terms (weight 0.5)
 //   bm25+pref   BM25, plus Laya preference tags when Laya judges the question to ask for preferences
 //   bm25+qe+pref both of the above
+//   rm3         BM25 + RM3 pseudo-relevance feedback (Anserini defaults), no model / no LLM
+//   dense-<e>   modern embeddings via LM Studio (e = qwen3 | nomic), cosine similarity
+//   rrf-bm25+<e>, rrf-bm25qe+<e>  reciprocal rank fusion (k=60) of BM25 (or BM25+qe) with dense-<e>
+//   <r>:<base>  cross-encoder re-ranking (r = bge | minilm) of <base>'s top 50, e.g. bge:bm25+qe
 //   sparse      learned sparse retrieval (OpenSearch doc-only neural sparse model, rank_features)
 //   bm25-fuzzy  BM25 with fuzzy term matching (tolerates misspellings / speech-to-text errors)
 //   laya        parallel Laya scan: every document of the question's history scored on the GPU
@@ -26,6 +30,9 @@ import { contrieverRanking, loadContriever } from './contriever.js';
 import { QueryExpander } from './expansion.js';
 import { encodeDocs, loadSparse, queryWeights } from './sparse.js';
 import { PreferenceTags } from './preference.js';
+import { Embedder, EMBEDDERS, rrf } from './embeddings.js';
+import { rm3Query } from './rm3.js';
+import { Reranker, RERANKERS, type RerankerName } from './rerank.js';
 import {
   buildCorpus,
   evaluateRetrieval,
@@ -42,7 +49,14 @@ const OPENSEARCH = process.env.OPENSEARCH_URL ?? 'http://localhost:9201';
 const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
 const DATA = new URL('../../../data/benchmarks/longmemeval/', import.meta.url);
 const RERANK_DEPTH = 50;
-const ALL_METHODS = ['contriever', 'bm25-paper', 'bm25', 'bm25+qe', 'bm25+pref', 'bm25+qe+pref', 'sparse', 'bm25-fuzzy', 'laya', 'bm25+laya'] as const;
+const ALL_METHODS = [
+  'contriever', 'bm25-paper', 'bm25', 'bm25+qe', 'rm3',
+  'dense-qwen3', 'rrf-bm25+qwen3', 'rrf-bm25qe+qwen3',
+  'dense-nomic', 'rrf-bm25+nomic', 'rrf-bm25qe+nomic',
+  'bm25+pref', 'bm25+qe+pref', 'sparse', 'bm25-fuzzy', 'laya', 'bm25+laya',
+  'minilm:bm25+qe', 'bge:bm25+qe', 'minilm:rrf-bm25qe+qwen3', 'bge:rrf-bm25qe+qwen3',
+  'minilm:rrf-bm25qe+nomic', 'bge:rrf-bm25qe+nomic',
+] as const;
 // fixed before running, not tuned on the test questions
 const EXPANSION_WEIGHT = 0.5;
 const PREFERENCE_WEIGHT = 0.5; // added to the per-question max-normalised BM25 score
@@ -58,6 +72,11 @@ const limit = Number(arg('limit', '0'));
 const dataset = arg('dataset', 'longmemeval_s_cleaned');
 const methods = arg('methods', 'bm25-paper,bm25,bm25-fuzzy,laya,bm25+laya').split(',') as Method[];
 for (const m of methods) if (!ALL_METHODS.includes(m)) throw new Error(`unknown method ${m}`);
+// a re-ranker needs its first stage computed in the same run
+for (const m of methods) {
+  const base = m.split(':')[1];
+  if (base && !methods.includes(base as Method)) throw new Error(`${m} needs ${base} in --methods`);
+}
 const index = `bench-${dataset.replace(/_/g, '-')}-${granularity}`;
 const dataFile = fileURLToPath(new URL(`${dataset}.json`, DATA));
 const outDir = new URL('results/', DATA);
@@ -71,6 +90,17 @@ if (methods.includes('sparse')) {
 }
 const expander = new QueryExpander(new URL(`${dataset}.expansions.json`, outDir));
 const prefTags = new PreferenceTags(new URL(`${dataset}.preference-tags.json`, outDir));
+const rerankers = Object.fromEntries(
+  (Object.keys(RERANKERS) as RerankerName[])
+    .filter((r) => methods.some((m) => m.startsWith(`${r}:`)))
+    .map((r) => [r, new Reranker(r)]),
+);
+for (const r of Object.values(rerankers)) await r.load();
+const embedders = Object.fromEntries(
+  Object.keys(EMBEDDERS)
+    .filter((e) => methods.some((m) => m.endsWith(e)))
+    .map((e) => [e, new Embedder(EMBEDDERS[e], new URL('embeddings/', outDir))]),
+);
 
 type Row = {
   question_id: string;
@@ -153,6 +183,40 @@ async function evaluate(q: Question): Promise<Row> {
     row.latencyMs['bm25+qe'] = Date.now() - t;
     row.scanned['bm25+qe'] = 0;
   }
+  if (methods.includes('rm3')) {
+    t = Date.now();
+    rankings.rm3 = complete(await rm3Ranking(q, position), corpus.length);
+    row.latencyMs.rm3 = Date.now() - t;
+    row.scanned.rm3 = 0;
+  }
+  for (const [e, embedder] of Object.entries(embedders)) {
+    // embedding the documents is index-time work in a real system: done first, not timed
+    await embedder.embedDocs(corpus.map((d) => d.text));
+    t = Date.now();
+    const dense = await embedder.ranking(corpus.map((d) => d.text), q.question);
+    const denseMs = Date.now() - t;
+    const dm = `dense-${e}` as Method;
+    if (methods.includes(dm)) {
+      rankings[dm] = dense;
+      row.latencyMs[dm] = denseMs;
+      row.scanned[dm] = corpus.length;
+    }
+    const hm = `rrf-bm25+${e}` as Method;
+    if (methods.includes(hm)) {
+      rankings[hm] = rrf([bm25, dense], corpus.length);
+      row.latencyMs[hm] = Math.max(bm25Ms, denseMs); // the two retrievers run in parallel
+      row.scanned[hm] = corpus.length;
+    }
+    const qm = `rrf-bm25qe+${e}` as Method;
+    if (methods.includes(qm)) {
+      const expansion = await expander.expand(q.question_id, q.question);
+      t = Date.now();
+      const bm25qe = complete(await bm25Ranking(q, position, false, expansion), corpus.length);
+      rankings[qm] = rrf([bm25qe, dense], corpus.length);
+      row.latencyMs[qm] = Math.max(Date.now() - t, denseMs);
+      row.scanned[qm] = corpus.length;
+    }
+  }
   for (const m of ['bm25+pref', 'bm25+qe+pref'] as const) {
     if (!methods.includes(m)) continue;
     const expansion = m === 'bm25+qe+pref' ? await expander.expand(q.question_id, q.question) : undefined;
@@ -197,6 +261,15 @@ async function evaluate(q: Question): Promise<Row> {
     row.latencyMs['bm25+laya'] = bm25Ms + (Date.now() - t);
     row.scanned['bm25+laya'] = head.length;
   }
+  for (const m of methods.filter((x) => x.includes(':'))) {
+    const [r, base] = m.split(':') as [RerankerName, Method];
+    t = Date.now();
+    const head = rankings[base]!.slice(0, RERANK_DEPTH);
+    const scores = await rerankers[r].score(q.question, head.map((i) => corpus[i].text));
+    rankings[m] = [...byScore(head, scores), ...rankings[base]!.slice(RERANK_DEPTH)];
+    row.latencyMs[m] = (row.latencyMs[base] ?? 0) + (Date.now() - t);
+    row.scanned[m] = head.length;
+  }
   for (const m of methods) row.metrics[m] = metricsFor(rankings[m]!, correct, ids);
   row.layaPeakMb = layaPeakMb;
   return row;
@@ -225,6 +298,23 @@ async function bm25Scores(q: Question, position: Map<string, number>, expansion?
   });
   const hits = (res as { hits: { hits: { _score: number; _source: { docId: string } }[] } }).hits.hits;
   return new Map(hits.filter((h) => position.has(h._source.docId)).map((h) => [position.get(h._source.docId)!, h._score]));
+}
+
+/** BM25, then RM3 feedback from its top hits, then BM25 with the expanded weighted term query. */
+async function rm3Ranking(q: Question, position: Map<string, number>): Promise<number[]> {
+  const filter = [{ term: { qid: q.question_id } }];
+  const first = (await post(`${OPENSEARCH}/${index}/_search`, {
+    size: 10,
+    _source: false,
+    query: { bool: { filter, must: [{ match: { text: q.question } }] } },
+  })) as { hits: { hits: { _id: string; _score: number }[] } };
+  const should = await rm3Query(OPENSEARCH, index, post, q.question, first.hits.hits);
+  const res = (await post(`${OPENSEARCH}/${index}/_search`, {
+    size: 10000,
+    _source: ['docId'],
+    query: { bool: { filter, should, minimum_should_match: 1 } },
+  })) as { hits: { hits: { _source: { docId: string } }[] } };
+  return res.hits.hits.map((h) => position.get(h._source.docId)!).filter((i) => i !== undefined);
 }
 
 /** Dot product of IDF-weighted query tokens with the documents' rank_features. */

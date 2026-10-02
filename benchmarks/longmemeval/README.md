@@ -127,18 +127,20 @@ Published reference (paper Table 9, original data, session level, recall@5): BM2
 ## Running
 
 ```sh
-npm install
-docker compose up -d opensearch            # repo root
-services/laya/run.sh                       # for Laya-based methods
-# download the datasets into data/benchmarks/longmemeval/ (see LongMemEval's README)
-npm run bench -w longmemeval-bench -- --dataset longmemeval_m_cleaned \
+npm run setup                                   # repo root: tools, dependencies, containers
+services/laya/run.sh                            # for the Laya-based methods
+# download longmemeval_s_cleaned.json / longmemeval_m_cleaned.json into data/benchmarks/longmemeval/
+npm run bench -w @bench/longmemeval -- --dataset longmemeval_m_cleaned \
   --methods 'bm25,bm25+qe,minilm:bm25' --rerank-depth 20 --tag mytag
 ```
 
 `--granularity turn|session`, `--limit N`, `--fresh` (restart), `--tag` (separate progress file;
 runs are resumable). Dense methods need LM Studio with the embedding model loaded; `contriever` and
-`sparse` need the one-time ONNX exports in `services/contriever` and `services/sparse-encoder`;
-`bm25+qe` needs an LLM in LM Studio (expansions are cached after the first run).
+`sparse` need the one-time ONNX exports (`services/onnx-export/run.sh contriever|sparse`); `bm25+qe`
+needs the LLM in LM Studio (expansions are cached after the first run).
+
+`npm run load-library -w @bench/longmemeval` loads a LongMemEval_M-based library into the agent's
+memory to try recall by voice, and writes the question sheet the router and voicechat benchmarks use.
 
 ## Glossary
 

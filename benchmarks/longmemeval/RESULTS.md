@@ -1,6 +1,6 @@
 # LongMemEval retrieval results
 
-Official protocol (ports of LongMemEval's `eval_utils.py` / `run_retrieval.py`): user turns as documents, question as query, abstention and no-target questions excluded. Machine: M5 Max. Run: `npm run bench -w longmemeval-bench`.
+Official protocol (ports of LongMemEval's `eval_utils.py` / `run_retrieval.py`): user turns as documents, question as query, abstention and no-target questions excluded. Machine: M5 Max. Run: `npm run bench -w @bench/longmemeval`.
 
 ## LongMemEval (longmemeval_s_cleaned, turn granularity, 419 questions)
 | retriever | turn.recall_any@1 | turn.recall_any@5 | turn.recall_any@10 | turn.ndcg_any@10 | session.recall_any@5 | session.recall_all@5 | session.recall_any@10 | session.ndcg_any@10 | p50 ms | p95 ms | docs scanned |

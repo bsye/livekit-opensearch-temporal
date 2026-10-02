@@ -1,0 +1,15 @@
+{
+  "name": "@bench/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./speech": "./src/speech.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@voice/config": "*"
+  }
+}

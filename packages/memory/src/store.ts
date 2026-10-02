@@ -1,4 +1,5 @@
 import { env } from '@voice/config'
+import { requestJson } from '@voice/http'
 import { ask } from '@voice/laya'
 
 export const TOPICS = {
@@ -140,12 +141,4 @@ export async function search(body: unknown): Promise<SearchHit[]> {
 
 const indexUrl = () => `${env('OPENSEARCH_URL')}/${env('MEMORY_INDEX')}`
 
-async function request(method: string, url: string, body: unknown, contentType = 'application/json'): Promise<unknown> {
-  const res = await fetch(url, {
-    method,
-    headers: { 'content-type': contentType },
-    body: typeof body === 'string' ? body : JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${method} ${url}: ${res.status} ${await res.text()}`)
-  return res.json()
-}
+const request = requestJson<unknown>

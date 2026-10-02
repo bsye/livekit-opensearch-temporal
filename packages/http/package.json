@@ -1,13 +1,9 @@
 {
-  "name": "@voice/laya",
+  "name": "@voice/http",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@voice/config": "*",
-    "@voice/http": "*"
   }
 }

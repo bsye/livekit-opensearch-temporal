@@ -12,8 +12,10 @@
     "topics": "node --env-file=../../.env --import tsx src/topics.ts"
   },
   "dependencies": {
+    "@bench/shared": "*",
     "@huggingface/transformers": "^4.3.0",
     "@voice/config": "*",
+    "@voice/http": "*",
     "@voice/laya": "*",
     "@voice/memory": "*",
     "@voice/text": "*",

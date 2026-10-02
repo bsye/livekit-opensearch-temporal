@@ -1,4 +1,5 @@
 import { env } from '@voice/config'
+import { postJson } from '@voice/http'
 
 export type Question =
   | { type: 'noul'; instructions: string }
@@ -42,12 +43,4 @@ export async function route(text: string): Promise<Route> {
   return ROUTES[answers.q.choice ?? ''] ?? 'chat'
 }
 
-async function post(path: string, body: unknown): Promise<unknown> {
-  const res = await fetch(`${env('LAYA_BASE_URL')}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`laya ${path}: ${res.status} ${await res.text()}`)
-  return res.json()
-}
+const post = (path: string, body: unknown) => postJson<unknown>(`${env('LAYA_BASE_URL')}${path}`, body)

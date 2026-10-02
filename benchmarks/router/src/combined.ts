@@ -1,3 +1,4 @@
+import { median, percent } from '@bench/shared'
 import { isFirstPerson } from '@voice/agent/s2s-routing'
 import { route } from '@voice/laya'
 import { recall, warmReranker } from '@voice/memory'
@@ -17,15 +18,13 @@ for (const t of routerTurns()) {
   rows.push({ ...t, laya: laya === 'past', top: r.hits[0]?.score ?? -99, ms: performance.now() - start })
 }
 
-const pct = (n: number, d: number) => `${((100 * n) / d).toFixed(0)}%`
 const past = rows.filter((r) => r.label === 'past')
 const other = rows.filter((r) => r.label !== 'past')
-const p50 = rows.map((r) => r.ms).sort((a, b) => a - b)[rows.length >> 1]
-console.log(`${rows.length} turns; Laya + recall in parallel p50 ${p50.toFixed(0)} ms\n`)
+console.log(`${rows.length} turns; Laya + recall in parallel p50 ${median(rows.map((r) => r.ms)).toFixed(0)} ms\n`)
 console.log('rule                          | past turns searched | non-past turns searched')
 const rule = (name: string, f: (r: Row) => boolean) =>
   console.log(
-    `${name.padEnd(29)} | ${pct(past.filter(f).length, past.length).padStart(19)} | ${pct(other.filter(f).length, other.length).padStart(5)} (${other.filter(f).length})`,
+    `${name.padEnd(29)} | ${percent(past.filter(f).length, past.length).padStart(19)} | ${percent(other.filter(f).length, other.length).padStart(5)} (${other.filter(f).length})`,
   )
 rule('laya only', (r) => r.laya)
 for (const th of [0, 2, 4, 6]) rule(`gate >= ${th} only`, (r) => r.top >= th)

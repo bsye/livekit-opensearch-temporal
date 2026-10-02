@@ -9,6 +9,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
     "@voice/config": "*",
+    "@voice/http": "*",
     "@voice/laya": "*",
     "@voice/text": "*"
   }

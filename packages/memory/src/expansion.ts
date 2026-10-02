@@ -1,4 +1,5 @@
 import { env } from '@voice/config'
+import { completeChat } from '@voice/http'
 
 const SYSTEM =
   'You generate search keywords. Given a question a user asks about their own past chats, output the words and short ' +
@@ -12,22 +13,17 @@ export async function expandQuery(
   question: string,
   llm: { baseUrl: string; model: string } = { baseUrl: env('LLM_BASE_URL'), model: env('LLM_MODEL') },
 ): Promise<string> {
-  const res = await fetch(`${llm.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: llm.model,
-      reasoning_effort: 'none',
-      temperature: 0,
-      max_tokens: 120,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: EXAMPLE_QUESTION },
-        { role: 'assistant', content: EXAMPLE_TERMS },
-        { role: 'user', content: `Question: ${question}` },
-      ],
-    }),
+  const message = await completeChat(llm.baseUrl, {
+    model: llm.model,
+    reasoning_effort: 'none',
+    temperature: 0,
+    max_tokens: 120,
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: EXAMPLE_QUESTION },
+      { role: 'assistant', content: EXAMPLE_TERMS },
+      { role: 'user', content: `Question: ${question}` },
+    ],
   })
-  if (!res.ok) throw new Error(`query expansion: ${res.status} ${await res.text()}`)
-  return ((await res.json()) as { choices: { message: { content: string } }[] }).choices[0].message.content.trim()
+  return (message.content ?? '').trim()
 }

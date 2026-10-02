@@ -1,3 +1,4 @@
+import { median, percent } from '@bench/shared'
 import { rerankScores, search, warmReranker } from '@voice/memory'
 import { routerTurns, type Turn } from './turns.js'
 
@@ -16,8 +17,7 @@ for (const t of turns) {
   rows.push({ ...t, top: scores.length ? Math.max(...scores) : -99, ms: performance.now() - start })
 }
 
-const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
-const pct = (xs: typeof rows, th: number) => `${((100 * xs.filter((r) => r.top >= th).length) / xs.length).toFixed(0)}%`
+const pct = (xs: typeof rows, th: number) => percent(xs.filter((r) => r.top >= th).length, xs.length)
 const past = rows.filter((r) => r.label === 'past')
 const action = rows.filter((r) => r.label === 'action')
 const chat = rows.filter((r) => r.label === 'chat')

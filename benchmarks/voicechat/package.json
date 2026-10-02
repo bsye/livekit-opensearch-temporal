@@ -9,8 +9,10 @@
   "dependencies": {
     "@bench/longmemeval": "*",
     "@bench/router": "*",
+    "@bench/shared": "*",
     "@voice/agent": "*",
     "@voice/config": "*",
+    "@voice/http": "*",
     "@voice/laya": "*",
     "@voice/memory": "*",
     "@voice/text": "*",

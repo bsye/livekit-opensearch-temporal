@@ -1,3 +1,4 @@
+import { median, percent } from '@bench/shared'
 import { ask, type Question, ROUTE_QUESTION } from '@voice/laya'
 import { ACTION, CHAT, type Label, routerTurns } from './turns.js'
 
@@ -17,8 +18,6 @@ const PHRASINGS: Record<string, Question> = {
 const CHOICES: Record<string, Label> = { A: 'past', B: 'action', C: 'chat' }
 
 const turns = routerTurns()
-const pct = (n: number, d: number) => `${((100 * n) / Math.max(d, 1)).toFixed(0)}%`
-const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
 const isPast = (l: Label) => l === 'past'
 
 await ask('warm up', { q: PHRASINGS['noul-past'] })
@@ -40,12 +39,14 @@ for (const [name, question] of Object.entries(PHRASINGS)) {
   const fn = results.filter((r) => isPast(r.label) && !isPast(r.predicted)).length
   console.log(`== ${name}`)
   console.log(
-    `   memory routing: recall ${pct(tp, tp + fn)} of past turns, precision ${pct(tp, tp + fp)}, ${fp} non-past turns sent to memory`,
+    `   memory routing: recall ${percent(tp, tp + fn)} of past turns, precision ${percent(tp, tp + fp)}, ${fp} non-past turns sent to memory`,
   )
   if (question.type === 'choice') {
     const correct = results.filter((r) => r.label === r.predicted).length
     const actions = results.filter((r) => r.label === 'action' && r.predicted === 'action').length
-    console.log(`   3-way accuracy ${pct(correct, results.length)}; actions recognised ${pct(actions, ACTION.length)}`)
+    console.log(
+      `   3-way accuracy ${percent(correct, results.length)}; actions recognised ${percent(actions, ACTION.length)}`,
+    )
   }
   console.log(
     `   latency: model p50 ${median(results.map((r) => r.modelMs)).toFixed(1)} ms, with HTTP p50 ${median(results.map((r) => r.httpMs)).toFixed(1)} ms`,
@@ -55,7 +56,7 @@ for (const [name, question] of Object.entries(PHRASINGS)) {
     const wantPast = isPast(rs[0].label)
     const ok = rs.filter((r) => isPast(r.predicted) === wantPast).length
     console.log(
-      `   ${group.padEnd(38)} ${wantPast ? 'sent to memory' : 'kept out of memory'}: ${pct(ok, rs.length)} (n=${rs.length})`,
+      `   ${group.padEnd(38)} ${wantPast ? 'sent to memory' : 'kept out of memory'}: ${percent(ok, rs.length)} (n=${rs.length})`,
     )
   }
   for (const m of results.filter((r) => isPast(r.label) !== isPast(r.predicted)).slice(0, 6)) {

@@ -3,8 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./turns": "./src/turns.ts",
-    "./speech": "./src/speech.ts"
+    "./turns": "./src/turns.ts"
   },
   "scripts": {
     "bench": "node --env-file=../../.env --import tsx src/run.ts",
@@ -15,8 +14,10 @@
   },
   "dependencies": {
     "@bench/longmemeval": "*",
+    "@bench/shared": "*",
     "@voice/agent": "*",
     "@voice/config": "*",
+    "@voice/http": "*",
     "@voice/laya": "*",
     "@voice/memory": "*",
     "@voice/text": "*"

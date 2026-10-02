@@ -1,6 +1,8 @@
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { flag, option, percentile } from '@bench/shared'
 import { dataPath, env } from '@voice/config'
+import { postJson, requestJson } from '@voice/http'
 import { scan } from '@voice/laya'
 import { RERANKERS, Reranker, type RerankerName } from '@voice/memory'
 import StreamArray from 'stream-json/streamers/StreamArray.js'
@@ -26,12 +28,8 @@ import { encodeDocs, loadSparse, queryWeights } from './sparse.js'
 
 const OPENSEARCH = env('OPENSEARCH_URL')
 const DATA = dataPath('benchmarks', 'longmemeval')
-const RERANK_MAX_LENGTH = Number(
-  process.argv.includes('--rerank-max-length') ? process.argv[process.argv.indexOf('--rerank-max-length') + 1] : 512,
-)
-const RERANK_DEPTH = Number(
-  process.argv.includes('--rerank-depth') ? process.argv[process.argv.indexOf('--rerank-depth') + 1] : 50,
-)
+const RERANK_MAX_LENGTH = Number(option('--rerank-max-length', '512'))
+const RERANK_DEPTH = Number(option('--rerank-depth', '50'))
 const ALL_METHODS = [
   'contriever',
   'bm25-paper',
@@ -69,14 +67,10 @@ const PREFERENCE_WEIGHT = 0.5
 const PREFERENCE_QUESTION_MIN = 0.5
 type Method = (typeof ALL_METHODS)[number]
 
-const arg = (name: string, fallback: string) => {
-  const i = process.argv.indexOf(`--${name}`)
-  return i > 0 ? process.argv[i + 1] : fallback
-}
-const granularity = arg('granularity', 'turn') as Granularity
-const limit = Number(arg('limit', '0'))
-const dataset = arg('dataset', 'longmemeval_s_cleaned')
-const methods = arg('methods', 'bm25-paper,bm25,bm25-fuzzy,laya,bm25+laya').split(',') as Method[]
+const granularity = option('--granularity', 'turn') as Granularity
+const limit = Number(option('--limit', '0'))
+const dataset = option('--dataset', 'longmemeval_s_cleaned')
+const methods = option('--methods', 'bm25-paper,bm25,bm25-fuzzy,laya,bm25+laya').split(',') as Method[]
 for (const m of methods) if (!ALL_METHODS.includes(m)) throw new Error(`unknown method ${m}`)
 for (const m of methods) {
   const base = m.split(':')[1]
@@ -123,9 +117,9 @@ type Row = {
   corpusSize: number
   layaPeakMb?: number
 }
-const tag = arg('tag', '')
+const tag = option('--tag', '')
 const progressFile = new URL(`${dataset}-${granularity}${tag ? `-${tag}` : ''}.progress.jsonl`, outDir)
-if (process.argv.includes('--fresh')) rmSync(progressFile, { force: true })
+if (flag('--fresh')) rmSync(progressFile, { force: true })
 const rows: Row[] = existsSync(progressFile)
   ? readFileSync(progressFile, 'utf8')
       .split('\n')
@@ -457,114 +451,83 @@ async function* questions(): AsyncGenerator<Question> {
   for await (const { value } of pipeline as AsyncIterable<{ key: number; value: Question }>) yield value
 }
 
-async function indexCorpus(): Promise<void> {
-  const marker = new URL(`${index}.indexed`, outDir)
-  const count = (await fetch(`${OPENSEARCH}/${index}/_count`).then((r) => (r.ok ? r.json() : { count: -1 }))) as {
-    count: number
-  }
-  if (existsSync(marker) && Number(readFileSync(marker, 'utf8')) === count.count) {
-    return console.log(`index ${index} ready (${count.count} docs)`)
-  }
-
-  console.log(`indexing ${dataset} (${granularity}) into ${index} …`)
-  await fetch(`${OPENSEARCH}/${index}`, { method: 'DELETE' })
-  await put(`${OPENSEARCH}/${index}`, {
-    settings: { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '-1' },
-    mappings: {
-      properties: {
-        qid: { type: 'keyword' },
-        docId: { type: 'keyword' },
-        text: { type: 'text', analyzer: 'english' },
-        timestamp: { type: 'keyword' },
-      },
+function indexCorpus() {
+  return buildIndex(
+    index,
+    {
+      qid: { type: 'keyword' },
+      docId: { type: 'keyword' },
+      text: { type: 'text', analyzer: 'english' },
+      timestamp: { type: 'keyword' },
     },
+    async (q, docs) =>
+      docs.map((d) => JSON.stringify({ qid: q.question_id, docId: d.id, text: d.text, timestamp: d.timestamp })),
+  )
+}
+
+function indexSparseCorpus() {
+  return buildIndex(
+    `${index}-sparse`,
+    { qid: { type: 'keyword' }, docId: { type: 'keyword' }, sparse: { type: 'rank_features' } },
+    async (q, docs) => {
+      const vectors = await encodeDocs(docs.map((d) => d.text))
+      return docs.map(
+        (d, i) => `{"qid":${JSON.stringify(q.question_id)},"docId":${JSON.stringify(d.id)},"sparse":${vectors[i]}}`,
+      )
+    },
+  )
+}
+
+/** Rebuilt only when the marker file and the index's document count disagree. */
+async function buildIndex(
+  name: string,
+  properties: Record<string, unknown>,
+  documents: (q: Question, docs: Doc[]) => Promise<string[]>,
+): Promise<void> {
+  const marker = new URL(`${name}.indexed`, outDir)
+  const { count } = await requestJson<{ count: number }>('GET', `${OPENSEARCH}/${name}/_count`).catch(() => ({
+    count: -1,
+  }))
+  if (existsSync(marker) && Number(readFileSync(marker, 'utf8')) === count) {
+    return console.log(`index ${name} ready (${count} docs)`)
+  }
+  console.log(`indexing ${dataset} (${granularity}) into ${name} …`)
+  await requestJson('DELETE', `${OPENSEARCH}/${name}`).catch(() => undefined)
+  await put(`${OPENSEARCH}/${name}`, {
+    settings: { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '-1' },
+    mappings: { properties },
   })
   let lines: string[] = []
   let total = 0
+  const started = Date.now()
   const flush = async () => {
     if (!lines.length) return
-    const res = await fetch(`${OPENSEARCH}/_bulk`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-ndjson' },
-      body: `${lines.join('\n')}\n`,
-    })
-    const body = (await res.json()) as { errors: boolean }
-    if (body.errors) throw new Error('bulk indexing errors')
+    const res = await requestJson<{ errors: boolean }>(
+      'POST',
+      `${OPENSEARCH}/_bulk`,
+      `${lines.join('\n')}\n`,
+      'application/x-ndjson',
+    )
+    if (res.errors) throw new Error('bulk indexing errors')
     lines = []
   }
   for await (const q of questions()) {
-    for (const d of buildCorpus(q, granularity)) {
-      lines.push(
-        JSON.stringify({ index: { _index: index } }),
-        JSON.stringify({ qid: q.question_id, docId: d.id, text: d.text, timestamp: d.timestamp }),
-      )
-      total++
-      if (lines.length >= 4000) await flush()
-    }
-    if (total % 100000 < buildCorpus(q, granularity).length) console.log(`  ${total} docs`)
+    const docs = buildCorpus(q, granularity)
+    for (const doc of await documents(q, docs)) lines.push(JSON.stringify({ index: { _index: name } }), doc)
+    total += docs.length
+    if (lines.length >= 2000) await flush()
+    if (total % 100000 < docs.length)
+      console.log(`  ${total} docs (${((Date.now() - started) / 60000).toFixed(1)} min)`)
   }
   await flush()
-  await put(`${OPENSEARCH}/${index}/_settings`, { index: { refresh_interval: '1s' } })
-  await fetch(`${OPENSEARCH}/${index}/_refresh`, { method: 'POST' })
+  await put(`${OPENSEARCH}/${name}/_settings`, { index: { refresh_interval: '1s' } })
+  await requestJson('POST', `${OPENSEARCH}/${name}/_refresh`)
   writeFileSync(marker, String(total))
   console.log(`indexed ${total} docs`)
 }
 
-async function indexSparseCorpus(): Promise<void> {
-  const sparseIndex = `${index}-sparse`
-  const marker = new URL(`${sparseIndex}.indexed`, outDir)
-  const count = (await fetch(`${OPENSEARCH}/${sparseIndex}/_count`).then((r) => (r.ok ? r.json() : { count: -1 }))) as {
-    count: number
-  }
-  if (existsSync(marker) && Number(readFileSync(marker, 'utf8')) === count.count) {
-    return console.log(`index ${sparseIndex} ready (${count.count} docs)`)
-  }
-  console.log(`encoding + indexing sparse vectors into ${sparseIndex} …`)
-  await fetch(`${OPENSEARCH}/${sparseIndex}`, { method: 'DELETE' })
-  await put(`${OPENSEARCH}/${sparseIndex}`, {
-    settings: { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '-1' },
-    mappings: {
-      properties: { qid: { type: 'keyword' }, docId: { type: 'keyword' }, sparse: { type: 'rank_features' } },
-    },
-  })
-  let lines: string[] = []
-  let total = 0
-  const flush = async () => {
-    if (!lines.length) return
-    const res = await fetch(`${OPENSEARCH}/_bulk`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-ndjson' },
-      body: `${lines.join('\n')}\n`,
-    })
-    if (((await res.json()) as { errors: boolean }).errors) throw new Error('bulk indexing errors')
-    lines = []
-  }
-  const startedAt = Date.now()
-  for await (const q of questions()) {
-    const docs = buildCorpus(q, granularity)
-    const vectors = await encodeDocs(docs.map((d) => d.text))
-    docs.forEach((d, i) => {
-      lines.push(
-        JSON.stringify({ index: { _index: sparseIndex } }),
-        `{"qid":${JSON.stringify(q.question_id)},"docId":${JSON.stringify(d.id)},"sparse":${vectors[i]}}`,
-      )
-    })
-    total += docs.length
-    if (lines.length >= 2000) await flush()
-    if (total % 100000 < docs.length)
-      console.log(`  ${total} docs (${((Date.now() - startedAt) / 60000).toFixed(1)} min)`)
-  }
-  await flush()
-  await put(`${OPENSEARCH}/${sparseIndex}/_settings`, { index: { refresh_interval: '1s' } })
-  await fetch(`${OPENSEARCH}/${sparseIndex}/_refresh`, { method: 'POST' })
-  writeFileSync(marker, String(total))
-  console.log(`indexed ${total} sparse docs`)
-}
-
 function report(): void {
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1)
-  const pct = (xs: number[], p: number) =>
-    [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * p))]
   const ran = ALL_METHODS.filter((m) => rows.some((r) => r.metrics[m]))
   const keys = [
     `${granularity}.recall_any@1`,
@@ -587,7 +550,7 @@ function report(): void {
     const vals = keys.map((k) => mean(rs.map((r) => r.metrics[m]![k])).toFixed(3))
     const lat = rs.map((r) => r.latencyMs[m]!)
     lines.push(
-      `| ${m} | ${vals.join(' | ')} | ${pct(lat, 0.5)} | ${pct(lat, 0.95)} | ${mean(rs.map((r) => r.scanned[m]!)).toFixed(0)} |`,
+      `| ${m} | ${vals.join(' | ')} | ${percentile(lat, 0.5)} | ${percentile(lat, 0.95)} | ${mean(rs.map((r) => r.scanned[m]!)).toFixed(0)} |`,
     )
   }
   const key = 'session.recall_any@5'
@@ -606,21 +569,9 @@ function report(): void {
   writeFileSync(new URL(`${dataset}-${granularity}-${stamp}.md`, outDir), `${text}\n`)
 }
 
-async function post(url: string, body: unknown): Promise<unknown> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${url}: ${res.status} ${await res.text()}`)
-  return res.json()
+function post(url: string, body: unknown) {
+  return postJson<unknown>(url, body)
 }
-
-async function put(url: string, body: unknown): Promise<void> {
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${url}: ${res.status} ${await res.text()}`)
+function put(url: string, body: unknown) {
+  return requestJson<unknown>('PUT', url, body)
 }

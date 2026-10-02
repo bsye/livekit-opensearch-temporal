@@ -1,4 +1,5 @@
 import { createReadStream, writeFileSync } from 'node:fs'
+import { option } from '@bench/shared'
 import { bulkIndex, deleteRoom, ensureIndex, type MemoryDoc, refresh, toMemoryDoc } from '@voice/memory'
 import { tableCell } from '@voice/text'
 import StreamArray from 'stream-json/streamers/StreamArray.js'
@@ -6,9 +7,7 @@ import { LIBRARY_DIR, LIBRARY_ROOM, LIBRARY_SHEET } from './library.js'
 
 const USER = 'me'
 const AGENT = 'assistant'
-const N_QUESTIONS = Number(
-  process.argv.includes('--questions') ? process.argv[process.argv.indexOf('--questions') + 1] : 100,
-)
+const N_QUESTIONS = Number(option('--questions', '100'))
 
 interface Turn {
   role: 'user' | 'assistant'

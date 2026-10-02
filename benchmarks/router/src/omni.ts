@@ -1,16 +1,16 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
+import { median, option, percent } from '@bench/shared'
+import { speak } from '@bench/shared/speech'
 import { exampleMessages, instructions } from '@voice/agent/omni-prompt'
 import { toolSpecs } from '@voice/agent/tool-specs'
 import { dataPath, env } from '@voice/config'
+import { completeChat } from '@voice/http'
 import { fileStamp } from '@voice/text'
-import { speak } from './speech.js'
 import { type Label, routerTurns, type Turn } from './turns.js'
 
-const arg = (name: string, def: string) =>
-  process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : def
-const MODES = arg('--modes', 'audio,audio+text,text').split(',')
-const LIMIT = Number(arg('--limit', '1000'))
-const PROMPT = arg('--prompt', 'plain')
+const MODES = option('--modes', 'audio,audio+text,text').split(',')
+const LIMIT = Number(option('--limit', '1000'))
+const PROMPT = option('--prompt', 'plain')
 const OMNI = env('OMNI_BASE_URL')
 const ACTION_TOOLS = new Set(['set_reminder', 'cancel_reminder', 'send_email'])
 
@@ -69,28 +69,18 @@ async function uploadAudio(pcm: Int16Array): Promise<string> {
 async function decide(mode: string, transcript: string, audioId: string) {
   const content = mode === 'text' ? transcript : `${transcript} <audio:${audioId}>`
   const started = Date.now()
-  const res = await fetch(`${OMNI}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: env('OMNI_MODEL'),
-      temperature: 0,
-      max_tokens: 120,
-      tools,
-      transcript_with_audio: mode === 'audio+text',
-      messages: [
-        { role: 'system', content: system },
-        ...(PROMPT === 'example' ? EXAMPLES.slice(0, 4) : PROMPT === 'examples' ? EXAMPLES : []),
-        { role: 'user', content },
-      ],
-    }),
+  const message = await completeChat(OMNI, {
+    model: env('OMNI_MODEL'),
+    temperature: 0,
+    max_tokens: 120,
+    tools,
+    transcript_with_audio: mode === 'audio+text',
+    messages: [
+      { role: 'system', content: system },
+      ...(PROMPT === 'example' ? EXAMPLES.slice(0, 4) : PROMPT === 'examples' ? EXAMPLES : []),
+      { role: 'user', content },
+    ],
   })
-  if (!res.ok) throw new Error(`omni: ${res.status} ${await res.text()}`)
-  const message = (
-    (await res.json()) as {
-      choices: { message: { content: string | null; tool_calls?: { function: { name: string } }[] } }[]
-    }
-  ).choices[0].message
   const called = (message.tool_calls ?? []).map((c) => c.function.name)
   const decision: Decision = called.includes('recall')
     ? 'recall'
@@ -122,18 +112,17 @@ for (const turn of turns) {
   process.stdout.write('.')
 }
 
-const pct = (n: number, d: number) => (d ? `${Math.round((100 * n) / d)}%` : '-')
-const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0
 console.log(
   '\n\nmode        | memory turns → recall | action turns → action tool | chat turns → no tool | non-memory turns → recall | p50',
 )
 for (const mode of MODES) {
   const rs = rows.filter((r) => r.mode === mode)
   const of = (label: Label) => rs.filter((r) => r.label === label)
-  const share = (label: Label, d: Decision) => pct(of(label).filter((r) => r.decision === d).length, of(label).length)
+  const share = (label: Label, d: Decision) =>
+    percent(of(label).filter((r) => r.decision === d).length, of(label).length)
   const others = rs.filter((r) => r.label !== 'past')
   console.log(
-    `${mode.padEnd(11)} | ${share('past', 'recall').padStart(21)} | ${share('action', 'action').padStart(26)} | ${share('chat', 'none').padStart(20)} | ${pct(others.filter((r) => r.decision === 'recall').length, others.length).padStart(25)} | ${median(rs.map((r) => r.ms))} ms`,
+    `${mode.padEnd(11)} | ${share('past', 'recall').padStart(21)} | ${share('action', 'action').padStart(26)} | ${share('chat', 'none').padStart(20)} | ${percent(others.filter((r) => r.decision === 'recall').length, others.length).padStart(25)} | ${median(rs.map((r) => r.ms))} ms`,
   )
 }
 console.log(

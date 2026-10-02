@@ -1,9 +1,11 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { libraryQuestions } from '@bench/longmemeval/library'
-import { speak } from '@bench/router/speech'
 import { ACTION, CHAT } from '@bench/router/turns'
+import { flag, median, option, percent } from '@bench/shared'
+import { speak } from '@bench/shared/speech'
 import { prompt, VOICECHAT_TOOLS } from '@voice/agent/s2s-prompt'
 import { dataPath, env } from '@voice/config'
+import { completeChat } from '@voice/http'
 import { route } from '@voice/laya'
 import { recallBrief, warmReranker } from '@voice/memory'
 import { fileStamp, removeBetween } from '@voice/text'
@@ -19,12 +21,10 @@ import {
 
 const VOICECHAT = env('VOICECHAT_URL')
 const LLM = env('LLM_BASE_URL')
-const arg = (name: string, def: string) =>
-  process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : def
-const SETS = arg('--sets', 'action,chat,memory').split(',')
-const MODES = arg('--modes', 's2s,s2s+laya,cascade').split(',')
-const LIMIT = Number(arg('--limit', '1000'))
-const VERBOSE = process.argv.includes('--verbose')
+const SETS = option('--sets', 'action,chat,memory').split(',')
+const MODES = option('--modes', 's2s,s2s+laya,cascade').split(',')
+const LIMIT = Number(option('--limit', '1000'))
+const VERBOSE = flag('--verbose')
 const OUT = dataPath('benchmarks', 'voicechat')
 
 const LEAD_SILENCE_FRAMES = 6
@@ -210,25 +210,20 @@ async function cascadeTurn(c: Case): Promise<Result> {
   ]
   const t0 = Date.now()
   for (let step = 0; step < 3; step++) {
-    const res = await fetch(`${LLM}/chat/completions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: env('LLM_MODEL'),
-        reasoning_effort: 'none',
-        temperature: 0,
-        messages,
-        tools: VOICECHAT_TOOLS.map((t) => ({ type: 'function', function: t })),
-      }),
+    const msg = await completeChat(LLM, {
+      model: env('LLM_MODEL'),
+      reasoning_effort: 'none',
+      temperature: 0,
+      messages,
+      tools: VOICECHAT_TOOLS.map((t) => ({ type: 'function', function: t })),
     })
-    const msg = ((await res.json()) as { choices: { message: Record<string, unknown> }[] }).choices[0].message
-    const calls = (msg.tool_calls ?? []) as { id: string; function: { name: string; arguments: string } }[]
+    const calls = msg.tool_calls ?? []
     if (!calls.length) {
       r.reply = removeBetween(String(msg.content ?? ''), '<|channel>', '<channel|>').trim()
       r.answerMs = Date.now() - t0
       break
     }
-    messages.push(msg)
+    messages.push({ role: 'assistant', ...msg })
     for (const call of calls) {
       r.tools.push(call.function.name)
       r.toolMs ??= Date.now() - t0
@@ -247,19 +242,14 @@ async function judge(c: Case, reply: string): Promise<boolean> {
     'subset of the information required by the answer, answer no. \n\n' +
     `Question: ${c.text}\n\nCorrect Answer: ${c.answer}\n\nModel Response: ${reply}\n\n` +
     'Is the model response correct? Answer yes or no only.'
-  const res = await fetch(`${LLM}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: env('LLM_MODEL'),
-      reasoning_effort: 'none',
-      temperature: 0,
-      max_tokens: 5,
-      messages: [{ role: 'user', content: judgePrompt }],
-    }),
+  const { content } = await completeChat(LLM, {
+    model: env('LLM_MODEL'),
+    reasoning_effort: 'none',
+    temperature: 0,
+    max_tokens: 5,
+    messages: [{ role: 'user', content: judgePrompt }],
   })
-  const out = ((await res.json()) as { choices: { message: { content: string } }[] }).choices[0].message.content
-  return out.toLowerCase().includes('yes')
+  return (content ?? '').toLowerCase().includes('yes')
 }
 
 mkdirSync(OUT, { recursive: true })
@@ -292,10 +282,9 @@ for (const c of cases) {
   }
 }
 
-const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(0)}%` : '-')
 const med = (xs: (number | undefined)[]) => {
-  const v = xs.filter((x): x is number => Number.isFinite(x)).sort((a, b) => a - b)
-  return v.length ? `${Math.round(v[Math.floor(v.length / 2)])}` : '-'
+  const m = median(xs)
+  return Number.isNaN(m) ? '-' : `${Math.round(m)}`
 }
 console.log('\n')
 for (const mode of MODES) {
@@ -305,17 +294,17 @@ for (const mode of MODES) {
   const recalled = (r: Result) => r.tools.some((t) => t.startsWith('recall'))
   console.log(`== ${mode}  (${rs.length} turns, ${results.filter((r) => r.mode === mode && r.error).length} errors)`)
   if (of('action').length)
-    console.log(`   action: tool called ${pct(of('action').filter(acting).length, of('action').length)}`)
+    console.log(`   action: tool called ${percent(of('action').filter(acting).length, of('action').length)}`)
   if (of('chat').length)
-    console.log(`   chat:   no tool ${pct(of('chat').filter((r) => !r.tools.length).length, of('chat').length)}`)
+    console.log(`   chat:   no tool ${percent(of('chat').filter((r) => !r.tools.length).length, of('chat').length)}`)
   if (of('memory').length) {
     const m = of('memory')
     console.log(
-      `   memory: recalled ${pct(m.filter(recalled).length, m.length)}, answered correctly ${pct(m.filter((r) => r.correct).length, m.length)}`,
+      `   memory: recalled ${percent(m.filter(recalled).length, m.length)}, answered correctly ${percent(m.filter((r) => r.correct).length, m.length)}`,
     )
     for (const [type, list] of Object.entries(groupBy(m, (r) => r.type ?? '')))
       console.log(
-        `     ${type.padEnd(28)} ${pct(list.filter((r) => r.correct).length, list.length)} (n=${list.length})`,
+        `     ${type.padEnd(28)} ${percent(list.filter((r) => r.correct).length, list.length)} (n=${list.length})`,
       )
   }
   console.log(

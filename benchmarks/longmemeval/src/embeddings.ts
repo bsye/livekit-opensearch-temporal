@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { env } from '@voice/config'
+import { postJson } from '@voice/http'
 
 const BATCH = 64
 
@@ -83,13 +84,10 @@ export class Embedder {
   }
 
   private async request(input: string[]): Promise<Float32Array[]> {
-    const res = await fetch(`${env('LLM_BASE_URL')}/embeddings`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: this.spec.model, input }),
+    const { data } = await postJson<{ data: { embedding: number[] }[] }>(`${env('LLM_BASE_URL')}/embeddings`, {
+      model: this.spec.model,
+      input,
     })
-    if (!res.ok) throw new Error(`embeddings ${this.spec.model}: ${res.status} ${await res.text()}`)
-    const data = ((await res.json()) as { data: { embedding: number[] }[] }).data
     return data.map((d) => normalise(Float32Array.from(d.embedding)))
   }
 }

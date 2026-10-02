@@ -8,7 +8,6 @@ export interface RecallQuery {
   from?: number
   to?: number
   limit?: number
-  /** The current conversation isn't "the past" yet. */
   excludeRoomSid?: string
 }
 
@@ -24,18 +23,12 @@ export interface RecallResult {
   ms: number
 }
 
-// Chosen on LongMemEval_M (benchmarks/longmemeval): BM25 top 20 re-ranked by MiniLM.
 const RERANK_DEPTH = 20
-// MiniLM logits below 0 mean "not relevant"; passing them on let the LLM blend unrelated messages into answers.
 const MIN_RERANK_SCORE = 0
 const EXPANSION_WEIGHT = 0.5
 const PREFERENCE_QUESTION =
   'Is the user asking for a recommendation or suggestion that should fit their own preferences or interests?'
 
-/**
- * BM25 over the user's words, re-ranked by a cross-encoder. Re-rankers trained on web search hurt
- * "what would I like?" questions, so Laya routes those to LLM query expansion instead.
- */
 export async function recall(q: RecallQuery): Promise<RecallResult> {
   const started = Date.now()
   const timings: Record<string, number> = {}
@@ -104,14 +97,8 @@ async function isPreferenceQuestion(question: string): Promise<boolean> {
   return (answers.q.noul ?? 0) >= 0.5
 }
 
-// says *earlier* conversations: the current one is in the model's chat history, and a bare "nothing
-// found" made it deny what the user had said a minute before
 export const NOTHING_FOUND = 'Nothing found about that in earlier conversations (this conversation is above).'
 
-/**
- * For the speech-to-speech model, which reads a tool result one token per 80 ms frame: the few
- * sentences the re-ranker scores highest across the top hits, dated and oldest first.
- */
 export async function recallBrief(q: RecallQuery, sentences = 3): Promise<{ text: string; top: number; hits: number }> {
   const { hits } = await recall(q)
   const nothing = { text: NOTHING_FOUND, top: -Infinity, hits: 0 }
@@ -120,8 +107,6 @@ export async function recallBrief(q: RecallQuery, sentences = 3): Promise<{ text
   const candidates = hits.flatMap(({ doc }) =>
     doc.userText
       .split(/(?<=[.!?])\s+|\n+/)
-      // statements only: a question isn't evidence ("What is Rachel's specialty?" asked in an earlier
-      // call came back as the answer to the same question)
       .filter((s) => s.trim().length > 12 && !s.trim().endsWith('?'))
       .map((s) => ({ s: s.trim().slice(0, 200), at: doc.endedAt })),
   )

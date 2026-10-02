@@ -10,18 +10,11 @@ export interface ToolDeps {
   room: () => RoomRef
   agent: () => string
   reportAction: (decision: ActionDecision) => void
-  /** Marks the next reply as answered from memory. */
   onRecall: () => void
-  /** Filled with each call's duration, by tool call id. */
   toolTimings?: Map<string, number>
-  /** A search already started on the user's words (see prefetch.ts). */
   prefetch?: RecallPrefetch
 }
 
-/**
- * The cascade's LLM tools, by risk: reminders run at once and can be undone; sending an email
- * needs the user's approval first. Laya audits every action afterwards.
- */
 export function createTools(actions: Actions, deps: ToolDeps) {
   const tools = {
     set_reminder: llm.tool({
@@ -73,8 +66,6 @@ export function createTools(actions: Actions, deps: ToolDeps) {
       execute: async ({ question, from, to }) => {
         deps.onRecall()
         const started = Date.now()
-        // the prefetched search used the user's own words; a time range, or nothing found there
-        // (a follow-up the model rephrased), needs a search on the model's question
         const early = !from && !to ? deps.prefetch?.current() : undefined
         let result = early ? await early.result.catch(() => undefined) : undefined
         const prefetched = !!result?.hits.length
@@ -110,7 +101,6 @@ export function createTools(actions: Actions, deps: ToolDeps) {
   return tools
 }
 
-/** Records how long each call took (approval included: it runs inside execute). */
 function timed(tool: { execute: (...args: never[]) => Promise<unknown> }, timings: Map<string, number>) {
   const execute = tool.execute.bind(tool) as (args: unknown, opts: { toolCallId: string }) => Promise<unknown>
   tool.execute = (async (args: unknown, opts: { toolCallId: string }) => {

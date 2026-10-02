@@ -1,6 +1,5 @@
 import { llm } from '@livekit/agents'
 
-/** The hybrid agent's instructions. Whether to search memory is the model's call, through recall. */
 export const instructions = (now: Date) => `You are a helpful voice assistant running fully on local models.
 You hear the user's voice directly; the text of their earlier turns is a transcript.
 Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.
@@ -14,11 +13,6 @@ If the user corrects a reminder or says undo, cancel it (and set the corrected o
 You have no weather, news or internet tools: say so instead of guessing.
 The current local time is ${now.toTimeString().slice(0, 5)}, ${now.toDateString()}.`
 
-/**
- * Worked recall exchanges placed before the conversation. Told in prose to call recall, the model
- * doesn't; shown an example, it does (benchmarks/router/RESULTS.md: 19-31% → 89% of memory turns).
- * The second example covers recommendations that should fit what the user likes.
- */
 export const RECALL_EXAMPLES = [
   {
     user: "What did I say my sister's new job was?",
@@ -34,7 +28,6 @@ export const RECALL_EXAMPLES = [
   },
 ]
 
-/** The examples as a LiveKit chat context, to start the agent's conversation with. */
 export function exampleChatCtx(): llm.ChatContext {
   const ctx = llm.ChatContext.empty()
   RECALL_EXAMPLES.forEach((e, i) => {
@@ -47,7 +40,6 @@ export function exampleChatCtx(): llm.ChatContext {
   return ctx
 }
 
-/** The same examples as OpenAI chat messages (benchmarks). */
 export function exampleMessages() {
   return RECALL_EXAMPLES.flatMap((e, i) => [
     { role: 'user', content: e.user },

@@ -1,5 +1,3 @@
-"""ONNX export of facebook/contriever (PyTorch weights only on the Hub) for the LongMemEval benchmark.
-Mean pooling and dot-product scoring happen in TypeScript, as in LongMemEval's run_retrieval.py."""
 import sys
 from pathlib import Path
 

@@ -18,7 +18,6 @@ export async function ask<K extends string>(
   return { answers: body.answers, latencyMs: body.latency_ms }
 }
 
-/** P(yes) of one yes/no question for each state, batched on the GPU. */
 export async function scan(states: string[], question: string): Promise<{ scores: number[]; peakMb?: number }> {
   const body = (await post('/v1/scan', { states, question })) as { scores: number[]; peak_mb?: number }
   return { scores: body.scores, peakMb: body.peak_mb }

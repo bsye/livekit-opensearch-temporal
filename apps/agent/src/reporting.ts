@@ -9,7 +9,6 @@ import {
   type Turn,
 } from '@voice/temporal'
 
-/** One pipeline measurement, folded into the current turn's timing. */
 export type AgentMetric =
   | { type: 'stt'; speechMs: number; transcriptionMs: number }
   | { type: 'eou'; endOfTurnMs: number }
@@ -17,12 +16,6 @@ export type AgentMetric =
   | { type: 'tts'; firstAudioMs: number }
   | { type: 'voice_to_voice'; ms: number }
 
-/**
- * What the agent tells Temporal. A turn is collected as it happens (the user's words, possibly over
- * several fragments; the memory route; tool calls, approvals and Laya audits; where the time went)
- * and sent as one signal when the agent's reply is complete: the room shows it as one
- * conversationTurn row. A failed signal never breaks the call.
- */
 export class RoomReporter {
   private turn = emptyTurn()
 
@@ -46,25 +39,23 @@ export class RoomReporter {
     this.turn.tools.push(step)
   }
 
-  /** Approval steps and Laya audits (audits can land just after the reply: they join the next turn then). */
   action = (decision: ActionDecision): void => {
     this.turn.actions.push(decision)
   }
 
-  /** Tool durations by tool call id, filled in by the tools as they run. */
   readonly toolTimings = new Map<string, number>()
 
   metric(m: AgentMetric): void {
     const t = this.turn.timing
     switch (m.type) {
-      case 'stt': // one per speech segment: a turn can have several
+      case 'stt':
         t.speechMs = (t.speechMs ?? 0) + m.speechMs
         t.transcriptionMs = m.transcriptionMs
         break
       case 'eou':
         t.endOfTurnMs = m.endOfTurnMs
         break
-      case 'llm': // the first call; later ones follow tool results
+      case 'llm':
         if (m.firstTokenMs >= 0) t.firstTokenMs ??= m.firstTokenMs
         break
       case 'tts':
@@ -76,7 +67,6 @@ export class RoomReporter {
     }
   }
 
-  /** The agent finished (or was cut off in) its reply: the turn is complete. */
   agentSaid(text: string, at: number, opts: { interrupted?: boolean; fromMemory?: boolean } = {}): void {
     const turn: Turn = {
       ...this.turn,
@@ -98,20 +88,13 @@ function emptyTurn(): Omit<Turn, 'agent' | 'reply' | 'endedAt'> {
   return { user: '', userText: '', startedAt: 0, tools: [], actions: [], timing: {} }
 }
 
-/**
- * Wires an AgentSession (cascade, omni) to the reporter: transcripts become turns, and executed tools
- * and pipeline timings join the current turn.
- */
 export function reportSession(
   session: voice.AgentSession,
   reporter: RoomReporter,
   opts: {
     user: () => string
-    /** VAD reports the end of speech this late; added back to voice-to-voice latency. */
     vadSilenceMs: number
-    /** Text as reported (e.g. without markers the agent adds to user messages). */
     clean?: (text: string) => string
-    /** Whether the reply being completed was answered from memory (read, then reset). */
     takeFromMemory?: () => boolean
     onUserText?: (text: string) => void
   },
@@ -143,7 +126,6 @@ export function reportSession(
     }
   })
 
-  // the TTS StreamAdapter re-emits the wrapped TTS's metrics, so each request arrives twice
   const reportedRequests = new Set<string>()
   session.on(voice.AgentSessionEventTypes.MetricsCollected, ({ metrics: m }) => {
     if ('requestId' in m && m.requestId) {
@@ -156,7 +138,6 @@ export function reportSession(
     if (metric) reporter.metric(metric)
   })
 
-  // voice-to-voice: user stops speaking → agent starts
   let userStoppedAt: number | undefined
   session.on(voice.AgentSessionEventTypes.UserStateChanged, ({ oldState, newState, createdAt }) => {
     if (oldState === 'speaking' && newState === 'listening') userStoppedAt = createdAt
@@ -181,7 +162,7 @@ function toAgentMetric(m: metrics.AgentMetrics): AgentMetric | undefined {
     case 'tts_metrics':
       return { type: 'tts', firstAudioMs: m.ttfbMs }
     default:
-      return undefined // VAD metrics fire continuously
+      return undefined
   }
 }
 

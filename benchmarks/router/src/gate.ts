@@ -1,8 +1,3 @@
-/**
- * Instead of classifying the turn: search memory on every turn (BM25 top 20 → MiniLM) and use the
- * results only when the best match is relevant enough. Same 220 turns as run.ts.
- *   npm run gate -w @bench/router
- */
 import { rerankScores, search, warmReranker } from '@voice/memory'
 import { routerTurns, type Turn } from './turns.js'
 

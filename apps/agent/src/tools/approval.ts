@@ -12,18 +12,12 @@ export interface ApprovalToolOptions<S extends z.AnyZodObject> {
   description: string
   parameters: S
   needsApproval: boolean | ((args: z.infer<S>) => boolean)
-  /** The action as read back to the user: "send the email to Marco". */
   describe: (args: z.infer<S>) => string
   execute: (args: z.infer<S>) => Promise<string>
   report: (decision: ActionDecision) => void
   participant: () => string
 }
 
-/**
- * A tool that asks the user first (like the OpenAI Agents SDK's `needsApproval`). It pauses inside its
- * own execute() and runs a confirmation AgentTask in the foreground, so the LLM can neither skip the
- * question nor claim success early: the tool is still running until the user answers.
- */
 export function approvalTool<S extends z.AnyZodObject>(opts: ApprovalToolOptions<S>) {
   return llm.tool({
     description: opts.description,
@@ -44,7 +38,6 @@ export function approvalTool<S extends z.AnyZodObject>(opts: ApprovalToolOptions
           })
         const what = opts.describe(args)
         record('confirm')
-        // the conversation so far, so the task understands "no, tell him Thursday"
         const history = ctx.session.chatCtx.copy({ excludeInstructions: true, excludeFunctionCall: true })
         const result = await ctx.foreground(() => confirmTask(what, history).run())
         record(result.approved ? 'confirmed' : 'declined', result.reason ? [result.reason] : [])
@@ -84,7 +77,6 @@ function confirmTask(what: string, chatCtx: llm.ChatContext): voice.AgentTask<Ap
         },
       }),
     },
-    // spoken verbatim: no LLM call, and the wording can't drift
     onEnter: ({ session }) => {
       session.say(`Just to confirm: ${what}?`)
     },

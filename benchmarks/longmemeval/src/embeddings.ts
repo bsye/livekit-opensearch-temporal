@@ -1,4 +1,3 @@
-// Dense retrieval via LM Studio's /v1/embeddings. Vectors are normalised and cached on disk per distinct text.
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -10,7 +9,7 @@ export interface EmbedderSpec {
   name: string
   model: string
   dim: number
-  queryPrefix: string // as the model card prescribes
+  queryPrefix: string
   docPrefix: string
 }
 
@@ -51,7 +50,6 @@ export class Embedder {
       const keys = readFileSync(this.keysFile, 'utf8').split('\n').filter(Boolean)
       const data = readFileSync(this.dataFile)
       const floats = new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4)
-      // an interrupted append can leave one file longer
       const n = Math.min(keys.length, Math.floor(floats.length / spec.dim))
       for (let i = 0; i < n; i++) this.vectors.set(keys[i], floats.slice(i * spec.dim, (i + 1) * spec.dim))
       console.log(`${spec.name}: ${n} cached embeddings loaded`)
@@ -62,7 +60,6 @@ export class Embedder {
     return (await this.request([this.spec.queryPrefix + question]))[0]
   }
 
-  /** Document vectors, embedding (and persisting) only texts not seen before. */
   async embedDocs(texts: string[]): Promise<Float32Array[]> {
     const missing = [...new Set(texts.filter((t) => !this.vectors.has(hash(t))))].sort((a, b) => a.length - b.length)
     for (let s = 0; s < missing.length; s += BATCH) {
@@ -78,7 +75,6 @@ export class Embedder {
     return texts.map((t) => this.vectors.get(hash(t))!)
   }
 
-  /** Ranking by cosine similarity (vectors are normalised), highest first. */
   async ranking(corpus: string[], question: string): Promise<number[]> {
     const q = await this.embedQuery(question)
     const docs = await this.embedDocs(corpus)
@@ -112,7 +108,6 @@ function dot(a: Float32Array, b: Float32Array): number {
   return s
 }
 
-/** Reciprocal rank fusion (Cormack et al. 2009) with the standard k = 60. */
 export function rrf(rankings: number[][], n: number, k = 60): number[] {
   const scores = new Float64Array(n)
   for (const ranking of rankings) for (const [rank, doc] of ranking.entries()) scores[doc] += 1 / (k + rank + 1)

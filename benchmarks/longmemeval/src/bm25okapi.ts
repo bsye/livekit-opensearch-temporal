@@ -1,5 +1,3 @@
-// Port of rank_bm25's BM25Okapi (https://github.com/dorianbrown/rank_bm25, Apache-2.0), the paper's
-// BM25: text split on spaces only, no lowercasing or stemming.
 export function bm25OkapiRanking(corpus: string[], query: string, k1 = 1.5, b = 0.75, epsilon = 0.25): number[] {
   const docs = corpus.map((d) => d.split(' '))
   const docFreqs = docs.map((doc) => {
@@ -10,7 +8,7 @@ export function bm25OkapiRanking(corpus: string[], query: string, k1 = 1.5, b = 
   const docLen = docs.map((d) => d.length)
   const avgdl = docLen.reduce((a, b) => a + b, 0) / docs.length
 
-  const nd = new Map<string, number>() // word → number of documents containing it
+  const nd = new Map<string, number>()
   for (const f of docFreqs) for (const w of f.keys()) nd.set(w, (nd.get(w) ?? 0) + 1)
   const idf = new Map<string, number>()
   let idfSum = 0
@@ -32,7 +30,6 @@ export function bm25OkapiRanking(corpus: string[], query: string, k1 = 1.5, b = 
       scores[i] += w * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * docLen[i]) / avgdl)))
     }
   }
-  // np.argsort(scores)[::-1]: ascending then reversed, so ties end up in descending index order
   return Array.from(scores.keys())
     .sort((a, c) => scores[a] - scores[c] || a - c)
     .reverse()

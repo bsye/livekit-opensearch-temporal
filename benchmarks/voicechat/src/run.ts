@@ -1,13 +1,3 @@
-/**
- * Speech-to-speech (NVIDIA VoiceChat) vs the cascade's LLM on the same turns, tools and memory:
- *   action  50 spoken tool requests      → did it call a tool?
- *   chat    50 turns that need no tool   → did it stay out of tools?
- *   memory  the LongMemEval library      → did it recall, and answer right (LongMemEval's judge prompt)?
- * Modes: s2s (the model calls tools itself), s2s+laya (Laya routes the model's own transcript and forces
- * recall in for memory turns), cascade (Gemma on a perfect transcript, no audio).
- *
- *   npm run bench -w @bench/voicechat -- [--sets action,chat,memory] [--modes s2s,s2s+laya,cascade] [--limit N] [--verbose]
- */
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { libraryQuestions } from '@bench/longmemeval/library'
 import { speak } from '@bench/router/speech'
@@ -65,7 +55,6 @@ const memory: Case[] = libraryQuestions().map((q) => ({
   text: q.question,
   answer: q.answer,
 }))
-// spread the limit over question types
 const byType = groupBy(memory, (c) => c.type!)
 const memoryCases: Case[] = []
 for (let i = 0; memoryCases.length < Math.min(LIMIT, memory.length); i++)
@@ -76,7 +65,6 @@ const cases: Case[] = [
   ...(SETS.includes('memory') ? memoryCases : []),
 ]
 
-// Same tool results in every mode.
 async function runTool(call: ToolCall): Promise<string> {
   const a = call.arguments as Record<string, string>
   switch (call.name) {
@@ -102,16 +90,16 @@ interface Result {
   set: string
   type?: string
   text: string
-  heard?: string // the model's transcript of the user
-  functionText?: string // raw function channel
+  heard?: string
+  functionText?: string
   reply: string
   tools: string[]
-  routed?: string // Laya's route (s2s+laya)
+  routed?: string
   prefetched?: boolean
-  replyMs?: number // end of user speech → first reply token
-  toolMs?: number // end of user speech → tool call complete (or prefetch injected)
-  injectMs?: number // compute to force the result in
-  answerMs?: number // end of user speech → first reply token after the tool result
+  replyMs?: number
+  toolMs?: number
+  injectMs?: number
+  answerMs?: number
   correct?: boolean
   frameP50?: number
   frameP95?: number
@@ -140,7 +128,7 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
   let speechEndAt = Infinity
   let handled = 0
   let pending: Promise<void> = Promise.resolve()
-  let resultInAt = 0 // wall clock when the last tool result finished going in
+  let resultInAt = 0
   const toolText = () => stripToolResponses(s.functionText)
 
   s.onFunction = () => {
@@ -159,7 +147,6 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
     }
   }
 
-  // real time: one 80 ms frame per 80 ms of wall clock
   const start = Date.now()
   let i = 0
   const sendUntil = async (done: () => boolean) => {
@@ -170,15 +157,14 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
       if (i === speechFrames - 1) {
         speechEndAt = Date.now()
         if (withLaya) {
-          // route on what the model heard; prefetch memory before it decides
           const heard = s.userText
           pending = pending.then(async () => {
             r.routed = await route(heard)
             if (r.routed !== 'past' || parseToolCalls(toolText()).length) return
             const call = { name: 'recall', arguments: { question: heard } }
             const out = await runTool(call)
-            if (parseToolCalls(toolText()).length) return // the model called a tool meanwhile
-            handled++ // the forced call appears on the function channel: don't run it again
+            if (parseToolCalls(toolText()).length) return
+            handled++
             r.prefetched = true
             r.tools.push('recall (prefetch)')
             r.toolMs = Date.now() - speechEndAt
@@ -254,7 +240,6 @@ async function cascadeTurn(c: Case): Promise<Result> {
   return r
 }
 
-/** LongMemEval's answer-judge prompt, with the cascade's LLM as judge. */
 async function judge(c: Case, reply: string): Promise<boolean> {
   const judgePrompt =
     'I will give you a question, a correct answer, and a response from a model. Please answer yes if the response ' +

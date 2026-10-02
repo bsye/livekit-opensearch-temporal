@@ -9,14 +9,13 @@ import {
 import { dataPath } from '@voice/config'
 
 export const RERANKERS = {
-  minilm: { repo: 'Xenova/ms-marco-MiniLM-L-6-v2', externalData: false }, // 22M, used by recall
-  bge: { repo: 'onnx-community/bge-reranker-v2-m3-ONNX', externalData: true }, // 568M, benchmark only
+  minilm: { repo: 'Xenova/ms-marco-MiniLM-L-6-v2', externalData: false },
+  bge: { repo: 'onnx-community/bge-reranker-v2-m3-ONNX', externalData: true },
 } as const
 export type RerankerName = keyof typeof RERANKERS
 
 const BATCH = 16
 
-/** Cross-encoder: reads the question and each passage together; scores are logits (> 0 = relevant). */
 export class Reranker {
   private loaded?: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }>
 
@@ -44,7 +43,6 @@ export class Reranker {
   async score(question: string, passages: string[]): Promise<number[]> {
     const { tokenizer, model } = await this.load()
     const scores = new Array<number>(passages.length)
-    // shortest first, so each batch pads to similar lengths
     const order = passages.map((_, i) => i).sort((a, b) => passages[a].length - passages[b].length)
     for (let s = 0; s < order.length; s += BATCH) {
       const idx = order.slice(s, s + BATCH)
@@ -65,7 +63,6 @@ export class Reranker {
   }
 }
 
-// 256 tokens: same LongMemEval accuracy as 512 (top-1 0.652, recall_any@5 0.862), cheaper on long messages
 const minilm = new Reranker('minilm', 256)
 
 export const rerankScores = (question: string, passages: string[]) => minilm.score(question, passages)

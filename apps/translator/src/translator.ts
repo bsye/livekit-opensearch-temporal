@@ -3,10 +3,8 @@ import { env } from '@voice/config'
 import { connectTemporal, type LiveKitEvent, signalRoom } from '@voice/temporal'
 import { WebhookReceiver } from 'livekit-server-sdk'
 
-/** LiveKit webhook → Temporal. Answers 2xx only once Temporal has accepted the signal, so LiveKit retries otherwise. */
 const receiver = new WebhookReceiver(env('LIVEKIT_API_KEY'), env('LIVEKIT_API_SECRET'))
 const client = await connectTemporal()
-// LiveKit sends the participant kind (AGENT, SIP, …) on some events only
 const participantKinds = new Map<string, string>()
 
 http

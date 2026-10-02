@@ -1,17 +1,3 @@
-/**
- * Instead of routing outside the model: does Qwen3-Omni, given the agent's real tools, decide by itself
- * to call recall for memory turns, an action tool for actions, and nothing for chat? Same 220 turns
- * as run.ts, spoken by Kokoro and transcribed by Parakeet as in a live call. Input modes:
- *   audio        the model hears the turn (as the live omni agent does)
- *   audio+text   it hears the turn and also reads the transcript
- *   text         it reads the transcript only
- *
- * Prompt variants: plain (the agent's instructions, recall left to the model), example (plus one
- * worked recall exchange for a fact, the usual fix for a model that won't call a tool) and examples
- * (plus a second one: a recommendation that checks the user's preferences first).
- *
- *   npm run omni -w @bench/router -- [--modes audio,audio+text,text] [--prompt plain|example] [--limit N]
- */
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { exampleMessages, instructions } from '@voice/agent/omni-prompt'
 import { toolSpecs } from '@voice/agent/tool-specs'
@@ -22,7 +8,7 @@ import { type Label, routerTurns, type Turn } from './turns.js'
 const arg = (name: string, def: string) =>
   process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : def
 const MODES = arg('--modes', 'audio,audio+text,text').split(',')
-const LIMIT = Number(arg('--limit', '1000')) // per label
+const LIMIT = Number(arg('--limit', '1000'))
 const PROMPT = arg('--prompt', 'plain')
 const OMNI = env('OMNI_BASE_URL')
 const ACTION_TOOLS = new Set(['set_reminder', 'cancel_reminder', 'send_email'])
@@ -38,7 +24,7 @@ interface Row extends Turn {
 }
 
 const tools = toolSpecs()
-const EXAMPLES = exampleMessages() // the agent's own: a fact, then a preference
+const EXAMPLES = exampleMessages()
 const system = instructions(new Date())
 
 function wav(pcm: Int16Array, rate = 16_000): Blob {

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# OpenAI-compatible STT + TTS on the Apple GPU (MLX). Outside Docker: containers on macOS can't use Metal.
 cd "$(dirname "$0")" && . ../lib.sh
 ensure_venv
 
@@ -8,7 +7,6 @@ server=$!
 trap 'kill $server 2>/dev/null' EXIT INT TERM
 until curl -sf "$SPEECH_BASE_URL/models" >/dev/null; do sleep 0.5; done
 
-# models load on first use: warm both so the first turn isn't slow
 warmup=$(mktemp -t mlx-warmup).wav
 curl -sf -o "$warmup" "$SPEECH_BASE_URL/audio/speech" -H 'content-type: application/json' \
   -d "{\"model\":\"$TTS_MODEL\",\"voice\":\"$TTS_VOICE\",\"input\":\"Warming up.\",\"response_format\":\"wav\"}"

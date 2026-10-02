@@ -1,7 +1,3 @@
-/**
- * Index the turns of past room workflows into conversation memory. Idempotent.
- *   npm run backfill-memory -w @voice/worker [-- --skip-users alice,tester]
- */
 import { indexExchange } from '@voice/memory'
 import { connectTemporal, type RoomState } from '@voice/temporal'
 
@@ -17,7 +13,7 @@ for await (const wf of client.workflow.list({ query: 'WorkflowType="roomSession"
   try {
     state = wf.status.name === 'RUNNING' ? await handle.query<RoomState>('roomState') : await handle.result()
   } catch {
-    continue // failed or terminated runs have no result
+    continue
   }
   const users = Object.values(state.participants)
     .filter((p) => p.kind !== 'AGENT')

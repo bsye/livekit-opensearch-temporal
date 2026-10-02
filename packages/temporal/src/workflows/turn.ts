@@ -9,11 +9,6 @@ const { indexConversationExchange } = proxyActivities<typeof activities>({
   retry: { maximumAttempts: 5 },
 })
 
-/**
- * One exchange of a room, as a child of its roomSession. Its rows, in order: the user's side (speaking,
- * recognition), the memory lookup, each tool call / approval / Laya audit, the agent's side (first
- * token, first audio, voice-to-voice), then indexing the exchange into conversation memory.
- */
 export async function conversationTurn(turn: Turn & { roomSid: string; roomName?: string }): Promise<Turn> {
   const note = (summary: string) => noteStep.executeWithOptions({ startToCloseTimeout: '10 seconds', summary }, [])
 
@@ -24,7 +19,6 @@ export async function conversationTurn(turn: Turn & { roomSid: string; roomName?
     const took = turn.memory.ms !== undefined ? ` · ${seconds(turn.memory.ms)}` : ''
     await note(`🧠 memory · ${turn.memory.route}${took} → ${what}`)
   }
-  // tool steps and decisions in the order they happened
   const steps = [
     ...turn.tools.map((t) => ({ at: t.at, label: toolLabel(t) })),
     ...turn.actions.map((a) => ({ at: a.at, label: actionLabel(a) })),
@@ -55,7 +49,7 @@ export async function conversationTurn(turn: Turn & { roomSid: string; roomName?
           },
         ],
       )
-      .catch(() => undefined) // a failed index must not fail the turn
+      .catch(() => undefined)
   }
   return turn
 }

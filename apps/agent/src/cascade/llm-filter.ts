@@ -5,10 +5,6 @@ const CLOSE = '<channel|>'
 const MARKERS = [OPEN, CLOSE]
 const LONGEST = Math.max(...MARKERS.map((m) => m.length))
 
-/**
- * After a tool call gemma-4 sometimes opens a thought channel in plain content ("<|channel>thought …
- * <channel|>"), which TTS would read out. Drops the thought and stray markers from the stream.
- */
 export async function* stripControlTokens(
   stream: AsyncIterable<llm.ChatChunk | string>,
 ): AsyncIterable<llm.ChatChunk | string> {
@@ -37,7 +33,6 @@ export async function* stripControlTokens(
         continue
       }
       pending = pending.replaceAll(CLOSE, '')
-      // hold back a tail that could still grow into a marker
       const keep = final ? 0 : partialMarkerLength(pending)
       out += pending.slice(0, pending.length - keep)
       pending = pending.slice(pending.length - keep)

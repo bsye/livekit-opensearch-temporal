@@ -1,4 +1,3 @@
-# Sourced by services/*/run.sh: loads the repo's .env and keeps a venv in sync with requirements.txt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 set -a; . "$ROOT/.env"; set +a
@@ -12,7 +11,7 @@ ensure_venv() {
   fi
 }
 
-port_of() { # http://host:8000/v1 → 8000
+port_of() {
   local p="${1##*:}"
   echo "${p%%/*}"
 }

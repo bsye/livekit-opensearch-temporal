@@ -1,18 +1,3 @@
-"""Qwen3-Omni-30B-A3B (MLX) as an OpenAI-compatible chat server that can hear the user's turn.
-
-Model-only sidecar for apps/agent/src/omni: the agent (TypeScript) runs LiveKit turn-taking, Parakeet
-transcripts for history, Kokoro for speech, tools, Laya and memory. Qwen3-Omni's own speech output
-is not used: mlx-vlm writes the whole reply before its voice starts (first audio after 4-5 s), while
-text streams from the first token after ~130 ms.
-
-  POST /v1/audio/turns?rate=N    raw mono PCM16 of one user turn (any rate, resampled to 16 kHz) → {"id": "..."}
-  POST /v1/chat/completions      OpenAI chat format (stream, tools). A user message containing
-                                 <audio:ID> is heard as that audio instead of read: the latest one
-                                 only; older turns keep their transcript (markers stripped).
-
-  .venv/bin/python server.py   (see run.sh)
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,22 +19,17 @@ from mlx_vlm import apc, load, stream_generate
 
 MODEL = os.environ.get("OMNI_MODEL", "mlx-community/Qwen3-Omni-30B-A3B-Instruct-4bit")
 PORT = int(os.environ.get("OMNI_PORT", "8300"))
-MAX_TURNS = 32  # recent turn audio kept for lookup
-# Also give the model the turn's transcript after its audio (benchmarks/router "Letting the model
-# decide": audio + transcript was the measured setting). A request's "transcript_with_audio" overrides.
+MAX_TURNS = 32
 TRANSCRIPT_WITH_AUDIO = os.environ.get("OMNI_TRANSCRIPT_WITH_AUDIO", "0").lower() in ("1", "true", "yes")
 AUDIO_MARKER = re.compile(r"<audio:([0-9a-f]+)>")
-MEMORY = re.compile(r"<memory>(.*?)</memory>", re.S)  # recall results the agent attached to a turn
+MEMORY = re.compile(r"<memory>(.*?)</memory>", re.S)
 TOOL_CALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
 
 model, processor = load(MODEL)
 if hasattr(model, "disable_talker"):
-    model.disable_talker()  # text only; Kokoro speaks
-# Automatic prefix caching: the system prompt, tool definitions and earlier turns are processed once
-# and reused by the next request; only the new turn (its audio) is computed. Without it every reply
-# re-read the whole conversation first (time to first token 0.5-3 s instead of ~0.15 s).
+    model.disable_talker()
 apc_manager = apc.from_env(model_namespace="qwen3-omni", overrides={"enabled": True, "disk_enabled": False})
-gpu = ThreadPoolExecutor(max_workers=1)  # MLX isn't thread-safe: one model call at a time
+gpu = ThreadPoolExecutor(max_workers=1)
 turns: OrderedDict[str, np.ndarray] = OrderedDict()
 app = FastAPI()
 
@@ -67,7 +47,7 @@ def models():
 def to_16k(pcm: np.ndarray, rate: int) -> np.ndarray:
     if rate == 16000:
         return pcm
-    if rate % 16000 == 0:  # 48 kHz from WebRTC: average each group (a crude low-pass) and decimate
+    if rate % 16000 == 0:
         k = rate // 16000
         return pcm[: len(pcm) // k * k].reshape(-1, k).mean(axis=1)
     return np.interp(np.arange(0, len(pcm), rate / 16000), np.arange(len(pcm)), pcm).astype(np.float32)
@@ -93,15 +73,6 @@ def text_of(content) -> str:
 
 
 def to_conversation(messages: list[dict], transcript_with_audio: bool = False) -> tuple[list[dict], list[np.ndarray]]:
-    """OpenAI messages → Qwen3-Omni conversation; the latest audio-marked user turn becomes audio.
-
-    With transcript_with_audio, that turn also keeps its transcript as text after the audio (opt-in
-    per request while it's measured: on audio alone the model often says it will act without calling
-    the tool)."""
-    # Only a turn the model hasn't answered yet is heard. Once a tool call/result follows it (the
-    # follow-up request), it goes back to its transcript: the model already heard it and decided, and
-    # audio in the middle of a prompt breaks mlx-vlm's prefix cache ("[broadcast_shapes] Shapes
-    # (75776) and (0)"), which then costs an uncached retry on every answer after a tool call.
     heard = None
     last = messages[-1] if messages else None
     if last and last["role"] == "user":
@@ -113,7 +84,7 @@ def to_conversation(messages: list[dict], transcript_with_audio: bool = False) -
         role = msg["role"]
         raw = AUDIO_MARKER.sub("", text_of(msg.get("content")))
         memory = MEMORY.findall(raw) if i == len(messages) - 1 or (heard and i == heard[0]) else []
-        text = MEMORY.sub("", raw).strip()  # older turns: transcript only
+        text = MEMORY.sub("", raw).strip()
         if heard and i == heard[0]:
             parts = [{"type": "audio", "audio": heard[1]}]
             if transcript_with_audio and text:
@@ -139,7 +110,6 @@ def model_inputs(conversation: list[dict], audios: list[np.ndarray], tools):
     prompt = processor.apply_chat_template(conversation, tools=tools or None, add_generation_prompt=True, tokenize=False)
     inputs = processor(text=[prompt], audio=audios or None, padding=True)
     kw = {k: v for k, v in inputs.items() if isinstance(v, mx.array)}
-    # as mlx_vlm's prepare_omni_inputs: the audio mask is per sample, the encoder counts mel frames
     if "feature_attention_mask" in kw and "audio_feature_lengths" not in kw:
         mask = kw["feature_attention_mask"]
         lengths = mask.sum(axis=1)
@@ -152,7 +122,7 @@ def model_inputs(conversation: list[dict], audios: list[np.ndarray], tools):
     return prompt, input_ids, kw
 
 
-DEFAULT_MAX_TOKENS = 300  # a spoken reply; a runaway generation would hold the only GPU thread
+DEFAULT_MAX_TOKENS = 300
 
 
 class Cancelled(Exception):
@@ -160,9 +130,8 @@ class Cancelled(Exception):
 
 
 def generate(body: dict, emit, cancel: threading.Event | None = None) -> dict:
-    """Runs on the GPU thread; emit(text_delta) per token; stops when `cancel` is set. Returns usage."""
     if cancel is not None and cancel.is_set():
-        raise Cancelled()  # cancelled while queued
+        raise Cancelled()
     conversation, audios = to_conversation(body["messages"], bool(body.get("transcript_with_audio", TRANSCRIPT_WITH_AUDIO)))
     if os.environ.get("OMNI_DEBUG"):
         for c in conversation:
@@ -192,8 +161,6 @@ def generate(body: dict, emit, cancel: threading.Event | None = None) -> dict:
     try:
         run(apc_manager)
     except ValueError as exc:
-        # mlx-vlm's prefix cache can reuse an earlier turn's audio positions for a new turn
-        # ("[broadcast_shapes] Shapes (1,649,2048) and (1,458,2048)"): redo this request uncached
         if completion:
             raise
         print(f"prefix cache failed ({exc}); retrying without it", flush=True)
@@ -221,10 +188,9 @@ def tool_calls_in(text: str) -> list[dict]:
 
 
 class SpeechFilter:
-    """Streams the reply's spoken text; from a <tool_call> on, nothing (the calls go out parsed)."""
 
     def __init__(self):
-        self.text = ""  # everything generated
+        self.text = ""
         self.sent = 0
         self.in_call = False
 
@@ -238,7 +204,7 @@ class SpeechFilter:
             self.in_call = True
             self.sent = len(self.text)
             return pending[:start]
-        lt = pending.rfind("<")  # hold back a possible partial "<tool_call>"
+        lt = pending.rfind("<")
         out = pending[:lt] if lt >= 0 and "<tool_call>".startswith(pending[lt:]) else pending
         self.sent += len(out)
         return out
@@ -276,8 +242,6 @@ async def chat(request: Request):
 
     queue: asyncio.Queue = asyncio.Queue()
     done = object()
-    # the agent cancels requests (an interrupted reply, a discarded draft): stop generating then,
-    # or the abandoned reply keeps the only GPU thread busy and the next turn waits behind it
     cancel = threading.Event()
 
     def work():
@@ -286,7 +250,7 @@ async def chat(request: Request):
             loop.call_soon_threadsafe(queue.put_nowait, ("usage", usage))
         except Cancelled:
             pass
-        except Exception as exc:  # surfaced to the client as an error chunk
+        except Exception as exc:
             loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
         loop.call_soon_threadsafe(queue.put_nowait, done)
 
@@ -296,7 +260,7 @@ async def chat(request: Request):
         try:
             async for event in stream():
                 yield event
-        finally:  # client gone (or done): stop the generation
+        finally:
             cancel.set()
 
     async def stream():

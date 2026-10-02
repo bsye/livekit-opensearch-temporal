@@ -1,11 +1,3 @@
-/**
- * Loads a LongMemEval_M-based library into conversation memory as "your" past, to try recall by voice
- * at realistic scale. One LongMemEval history only holds evidence for 1-2 questions, so the library is
- * one full history (~480 sessions over months) plus the evidence sessions of N questions across all
- * types, dates shifted so the timeline ends today. Writes a question sheet with the expected answers.
- *
- *   npm run load-library -w @bench/longmemeval [-- --questions 100]   (re-running replaces the library)
- */
 import { createReadStream, writeFileSync } from 'node:fs'
 import { bulkIndex, deleteRoom, ensureIndex, type MemoryDoc, refresh, toMemoryDoc } from '@voice/memory'
 import StreamArray from 'stream-json/streamers/StreamArray.js'
@@ -41,15 +33,12 @@ async function* questions(): AsyncGenerator<Question> {
   for await (const { value } of stream as AsyncIterable<{ value: Question }>) yield value
 }
 
-/** "2023/05/20 (Sat) 02:21" → unix ms, local time. */
 function parseDate(s: string): number {
   const m = s.match(/(\d{4})\/(\d{2})\/(\d{2}) \(\w+\) (\d{2}):(\d{2})/)
   if (!m) throw new Error(`bad date ${s}`)
   return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime()
 }
 
-// Pass 1: the history that already holds the evidence of the most questions, plus N questions across
-// types (abstention excluded: its evidence is deliberately absent; duplicate texts skipped).
 console.log('scanning LongMemEval_M …')
 const all: Summary[] = []
 for await (const q of questions()) {
@@ -77,7 +66,6 @@ console.log(
   `library: history of ${base.question_id} (${base.haystack.size} sessions) + evidence for ${chosen.length} questions → ${needed.size} sessions`,
 )
 
-// Pass 2: index every user → assistant exchange of those sessions
 await ensureIndex()
 await deleteRoom(LIBRARY_ROOM)
 let batch: MemoryDoc[] = []

@@ -1,6 +1,3 @@
-// Line-for-line ports of LongMemEval's eval_utils.py and run_retrieval.py, so results are comparable
-// with the paper. https://github.com/xiaowu0162/LongMemEval (MIT)
-
 export const KS = [1, 3, 5, 10, 30, 50]
 export type Granularity = 'session' | 'turn'
 
@@ -23,12 +20,11 @@ export interface Question {
 }
 
 export interface Doc {
-  id: string // corpus id; contains "answer" iff it is evidence
+  id: string
   text: string
   timestamp: string
 }
 
-/** process_item_flat_index: user content only; evidence ids keep "answer", others get "noans". */
 export function processItemFlatIndex(
   session: Turn[],
   granularity: Granularity,
@@ -62,7 +58,6 @@ export function buildCorpus(q: Question, granularity: Granularity): Doc[] {
   )
 }
 
-/** Questions the official script leaves out of the averages. */
 export function excluded(q: Question): 'abstention' | 'no-target' | undefined {
   if (q.question_id.includes('_abs')) return 'abstention'
   const userTurns = q.haystack_sessions.flat().filter((t) => t.role === 'user')

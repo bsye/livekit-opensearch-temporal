@@ -1,6 +1,3 @@
-// Interactive pickers for the shell scripts: the menu goes to stderr, the answer to stdout.
-//   choose.ts agent    one agent for npm start
-//   choose.ts models   agents to fetch models for in npm run setup
 import { checkbox, select } from '@inquirer/prompts'
 
 const AGENTS = [
@@ -23,6 +20,6 @@ try {
     throw new Error('usage: choose.ts agent|models')
   }
 } catch (err) {
-  if ((err as Error).name === 'ExitPromptError') process.exit(130) // Ctrl-C
+  if ((err as Error).name === 'ExitPromptError') process.exit(130)
   throw err
 }

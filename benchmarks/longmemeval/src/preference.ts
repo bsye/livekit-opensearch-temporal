@@ -1,7 +1,3 @@
-/**
- * Laya preference tags (tested, not adopted): turns stating a preference are boosted for questions Laya
- * judges to ask for one. Gold question types are never used. Scores are cached per distinct text.
- */
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { scan } from '@voice/laya'

@@ -222,7 +222,8 @@ Setup asks which agents to fetch models for (multi-select; the cascade is always
 | `omni` | Qwen3-Omni 30B-A3B hears the audio and answers in text, Kokoro speaks (~24 GB) |
 
 Skip the menus with `AGENT=omni npm start` and `npm run setup -- --s2s --omni`; outside a terminal
-the cascade is used. Only one agent runs at a time: starting one stops the others. `npm start`
+the cascade is used. `npm start -- <room> <identity>` picks the room and your name (defaults:
+`meet-<time>`, your user name), and `NO_OPEN=1` prints the meeting link instead of opening it. Only one agent runs at a time: starting one stops the others. `npm start`
 launches whatever isn't running, waits until each piece is ready and prints the room's Temporal
 link. Logs are in `.run/`.
 

@@ -1,6 +1,6 @@
 import WebSocket from 'ws'
 
-export const FRAME_SAMPLES = 1280 // 80 ms at 16 kHz
+export const FRAME_SAMPLES = 1280
 export const FRAME_MS = 80
 
 export interface ToolSpec {
@@ -14,7 +14,6 @@ export interface ToolCall {
   arguments: Record<string, unknown>
 }
 
-/** NVIDIA's function-calling template (NeMo speechlm2/function_calling/template.jinja). */
 export function systemPrompt(instructions: string, tools: ToolSpec[]): string {
   if (!tools.length) return instructions
   return (
@@ -32,7 +31,6 @@ export function stripToolResponses(functionText: string): string {
   return functionText.replace(/<TOOL_RESPONSE>[\s\S]*?<\/TOOL_RESPONSE>/g, '')
 }
 
-/** Completed tool calls on the function channel, tolerating the model's usual JSON slips. */
 export function parseToolCalls(functionText: string): ToolCall[] {
   const calls: ToolCall[] = []
   for (const m of functionText.matchAll(/<TOOLCALL>([\s\S]*?)<\/TOOLCALL>/g)) {
@@ -73,7 +71,6 @@ function safeJson(s: string): unknown {
   }
 }
 
-/** The model's TTS derails on non-ASCII (smart quotes, dashes, emoji), so tool results go in as plain ASCII. */
 export function ascii(s: string): string {
   return s
     .replace(/[‘’]/g, "'")
@@ -89,10 +86,6 @@ export interface TextEvent {
   delta: string
 }
 
-/**
- * One session is one continuous audio timeline: 80 ms frames in; out, per frame, the model's transcript
- * of the user, its own reply text, a function channel for tool calls, and 22.05 kHz audio.
- */
 export class VoiceChatSession {
   userText = ''
   assistantText = ''
@@ -150,13 +143,11 @@ export class VoiceChatSession {
     return new Promise((resolve) => this.waiters.push({ type, resolve }))
   }
 
-  /** One 80 ms frame of 16 kHz mono PCM16. */
   push(frame: Int16Array) {
     const audio = Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength).toString('base64')
     this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio }))
   }
 
-  /** Force a tool result onto the function channel; with `call`, also the call it answers. */
   async toolOutput(output: string, call?: ToolCall) {
     const done = this.next('conversation.item.injected')
     const item = { type: 'function_call_output', output: ascii(output), call: call && ascii(formatCall(call)) }
@@ -164,7 +155,6 @@ export class VoiceChatSession {
     await done
   }
 
-  /** Also a barrier: the server answers once every frame sent before it has been processed. */
   async stats(): Promise<{ frames: number; frame_ms_p50: number; frame_ms_p95: number }> {
     const r = this.next('session.stats')
     this.ws.send(JSON.stringify({ type: 'session.stats' }))

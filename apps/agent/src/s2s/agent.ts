@@ -23,24 +23,15 @@ import { prompt } from './prompt.js'
 
 const INPUT_RATE = 16_000
 const OUTPUT_RATE = 22_050
-// Transcript words arrive with gaps over 300 ms mid-sentence; routing sooner routes half questions.
 const ROUTE_AFTER_QUIET_MS = 700
-// A turn (the user's or the model's) is over when its text hasn't grown for this long.
 const TURN_QUIET_MS = 1200
 const MAX_HOLD_MS = 2500
-// The model can retry a failing call forever.
 const MAX_CALLS_PER_TURN = 3
-// Memory-turn rule, from benchmarks/router (combined.ts): 84% of memory turns, 21% false alarms.
 const STRONG_MATCH = 4
 const FIRST_PERSON = /\b(i|my|me|mine|i'm|i've|i'd|i'll)\b/i
 const REFERS_BACK =
   /\b(previous|earlier|last time|before|remind me what|we (talked|discussed|spoke|said)|you (told|said|mentioned|recommended|suggested)|did i (tell|mention|say))\b/i
 
-/**
- * NVIDIA VoiceChat (services/voicechat): one full-duplex model in place of STT → LLM → TTS. It hears
- * the user continuously and speaks every 80 ms, so it does its own turn-taking and barge-in. Tool calls
- * arrive on a separate function channel and run the same actions as the cascade.
- */
 export default defineAgent({
   prewarm: async () => {
     await warmReranker()
@@ -63,8 +54,7 @@ export default defineAgent({
     const model = await VoiceChatSession.open(env('VOICECHAT_URL'), prompt())
     console.log(`voicechat session ready in ${Date.now() - started}ms`)
 
-    // ---- tools
-    let userText = '' // the user's current turn, as the model heard it
+    let userText = ''
     let answeringFromMemory = false
     const auditor = new ActionAuditor(
       () => agentIdentity,
@@ -84,7 +74,6 @@ export default defineAgent({
           answeringFromMemory = true
           return (await recallBrief({ question: args.question ?? userText, excludeRoomSid: room.sid })).text
         case 'send_email': {
-          // the prompt has the model read the email back and call again with confirmed: true
           const confirmed = call.arguments.confirmed === true
           reportAction({
             tool: 'send_email',
@@ -135,7 +124,6 @@ export default defineAgent({
       }
     }
 
-    // ---- audio out, held while a turn is being routed
     const source = new AudioSource(OUTPUT_RATE, 1)
     await ctx.room.localParticipant!.publishTrack(
       LocalAudioTrack.createAudioTrack('voicechat', source),
@@ -158,12 +146,7 @@ export default defineAgent({
     }
     model.onAudio = (pcm) => (held ? held.push(pcm) : play(pcm))
 
-    // ---- memory routing
-    // VoiceChat answers "where did Rachel move?" from its own knowledge instead of calling recall, so
-    // the decision is made here: once per turn, Laya routes what the model heard while recall runs in
-    // parallel. For a memory turn the call and its result are forced in as if the model had made it,
-    // and whatever it had started saying meanwhile ("I'm sorry, I don't…") is dropped.
-    let userFrom = 0 // offsets into the model's cumulative transcripts
+    let userFrom = 0
     let agentFrom = 0
     let routedTurn = -1
     let routeTimer: NodeJS.Timeout | undefined
@@ -190,11 +173,9 @@ export default defineAgent({
         `route "${heard}": laya ${laya}, best match ${found.top.toFixed(1)} → ${memoryTurn ? 'memory' : 'no memory'} (${Date.now() - t}ms)`,
       )
       reporter.memory({ route: laya, text: memoryTurn ? found.text : undefined, ms: Date.now() - t })
-      // an empty search is only forced in for first-person turns: "tell me a joke" mustn't become "I don't remember"
       const worthForcing = memoryTurn && (found.hits > 0 || firstPerson || refersBack)
-      // the model called a tool itself meanwhile: its answer stands
       if (!worthForcing || modelCalls().length > callsBefore || callOpen()) return releaseAudio(true)
-      handledCalls++ // the forced call shows up on the function channel: don't run it again
+      handledCalls++
       turnCalls++
       turnRecalled = true
       answeringFromMemory = true
@@ -206,7 +187,6 @@ export default defineAgent({
       })
     }
 
-    // ---- turns: the model's transcripts are cumulative over the session, cut them into turns
     let lastUserAt = 0
     let lastAgentAt = 0
     let latencyPending = false
@@ -224,7 +204,6 @@ export default defineAgent({
       const now = Date.now()
       const lastText = model.textEvents.at(-1)
       if (latencyPending && lastText && lastText.at > lastUserAt) {
-        // the model decided the user finished: route now rather than wait for the quiet timer
         latencyPending = false
         void routeTurn()
         const durationMs = lastText.at - lastUserAt
@@ -251,7 +230,6 @@ export default defineAgent({
       }
     }, 200)
 
-    // ---- audio in: the user's microphone, cut into the model's 80 ms frames
     let listening = false
     const listen = async (track: RemoteTrack, identity: string) => {
       if (listening || track.kind !== TrackKind.KIND_AUDIO) return

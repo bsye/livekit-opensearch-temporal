@@ -4,7 +4,6 @@ import type { ActionDecision, LiveKitEvent, RoomSignal, RoomState, ToolStep, Tur
 
 export const TASK_QUEUE = 'livekit-rooms'
 
-// Created by infra/temporal/setup.sh
 export const RoomName = defineSearchAttributeKey('RoomName', SearchAttributeType.KEYWORD)
 export const ParticipantIdentities = defineSearchAttributeKey('ParticipantIdentities', SearchAttributeType.KEYWORD_LIST)
 
@@ -30,13 +29,8 @@ export function actorIcon(kind: string | undefined): string {
   }
 }
 
-// The Temporal UI labels signals, children and activities by name/summary only, so everything gets
-// a readable one and workflows accept any signal name via a default handler.
-
-/** A webhook: `👤 dalbi · track_published (AUDIO)`. */
 export function eventLabel(e: LiveKitEvent): string {
   if (e.participant) {
-    // protobuf JSON omits default enum values, and AUDIO is the default track type
     const track = e.track ? ` (${e.track.type ?? 'AUDIO'})` : ''
     return `${actorIcon(e.participant.kind)} ${e.participant.identity} · ${e.event}${track}`
   }
@@ -46,11 +40,9 @@ export function eventLabel(e: LiveKitEvent): string {
 }
 
 export function signalLabel(s: RoomSignal): string {
-  // a turn signal is followed by its labelled child row, so it stays short
   return s.type === 'livekitEvent' ? eventLabel(s.data) : '💬 turn received'
 }
 
-/** One row per turn: `💬 3 · 👤 “How was I feeling…” → 🤖 “You mentioned…” · 🧠 · 🛠 set_reminder · ⏱ 1.3s`. */
 export function turnLabel(t: Turn): string {
   const user = t.userText ? `👤 “${truncate(t.userText, 40)}” → ` : ''
   const marks = [
@@ -77,7 +69,6 @@ export function toolLabel(s: ToolStep): string {
   )
 }
 
-/** The user's side of a turn: `🎙 you spoke 2.1s · recognised in 0.4s · end of turn 0.7s`. */
 export function userTimingLabel(t: TurnTiming): string | undefined {
   const parts = [
     t.speechMs !== undefined ? `you spoke ${seconds(t.speechMs)}` : '',
@@ -87,7 +78,6 @@ export function userTimingLabel(t: TurnTiming): string | undefined {
   return parts.length ? `🎙 ${parts.join(' · ')}` : undefined
 }
 
-/** The agent's side: `🤖 first token 0.52s · first audio 0.18s · ⏱ voice-to-voice 1.8s`. */
 export function agentTimingLabel(t: TurnTiming): string | undefined {
   const parts = [
     t.firstTokenMs !== undefined ? `first token ${seconds(t.firstTokenMs)}` : '',

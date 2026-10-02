@@ -1,8 +1,3 @@
-/**
- * Laya's route and the re-ranker's best match together, run in parallel as the speech-to-speech agent
- * does, under several decision rules. Same 220 turns as run.ts.
- *   npm run combined -w @bench/router
- */
 import { route } from '@voice/laya'
 import { recall, warmReranker } from '@voice/memory'
 import { routerTurns, type Turn } from './turns.js'

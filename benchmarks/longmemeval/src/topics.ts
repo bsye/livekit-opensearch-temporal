@@ -1,15 +1,3 @@
-/**
- * Do topic filters help? Only the voice library has topics stored (Laya labels every exchange at
- * index time), so this runs on its 100 questions, against the live memory index. The model calls a
- * recall tool with 1-3 keyword queries and, optionally, the topic; we score whether an exchange of
- * the question's evidence session is in the top 5 (and first), for:
- *   minilm        BM25 on the question → MiniLM (today's recall, without the preference route)
- *   mq            the question and the model's queries, BM25 each, merged by RRF → MiniLM
- *   mq+filter     as mq, only the topic the model chose
- *   mq+boost      as mq, the model's topic boosted
- *
- *   npm run topics -w @bench/longmemeval
- */
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { env } from '@voice/config'
 import { rerankScores, type SearchHit, search, TOPICS } from '@voice/memory'
@@ -102,7 +90,6 @@ async function modelCall(question: string): Promise<Call> {
   return call
 }
 
-/** Evidence sessions of each library question, from the dataset (matched by question text). */
 async function evidence(questions: Set<string>): Promise<Map<string, Set<string>>> {
   const out = new Map<string, Set<string>>()
   const stream = createReadStream(`${LIBRARY_DIR}/longmemeval_m_cleaned.json`).pipe(StreamArray.withParser())

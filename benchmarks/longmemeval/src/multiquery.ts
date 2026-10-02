@@ -1,9 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
-/**
- * The model writes its own searches: given the question, it calls recall with 1 to 3 short keyword
- * queries for the different ways the user may have talked about it. Cached per question.
- */
 const SYSTEM =
   "You find what the user said in past conversations. For the user's question, call recall with 1 to 3 short " +
   'keyword queries: the words the user most likely used back then, one query per different way they may have ' +

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Stops the native services; with --all also the containers and the LM Studio model.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

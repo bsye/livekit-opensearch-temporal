@@ -1,5 +1,3 @@
-"""ONNX export of opensearch-neural-sparse-encoding-doc-v3-distill's document encoder, with SPLADE max
-pooling and the v3 activation inside the graph: one vocabulary-sized vector per document (model card recipe)."""
 import sys
 from pathlib import Path
 

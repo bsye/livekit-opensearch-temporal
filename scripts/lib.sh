@@ -1,4 +1,3 @@
-# Sourced by scripts/start.sh and scripts/stop.sh.
 RUN="$ROOT/.run"
 LMS="$HOME/.lmstudio/bin/lms"
 AGENTS="cascade s2s omni"
@@ -19,12 +18,10 @@ agent_entry() {
 
 interactive() { [ -t 0 ] && [ -t 2 ]; }
 
-# choose agent|models: arrow-key picker (scripts/choose.ts), prints the answer
 choose() { (cd "$ROOT" && node --import tsx scripts/choose.ts "$1"); }
 
 port_of() { local p="${1##*:}"; echo "${p%%/*}"; }
 
-# wait_for DESCRIPTION TIMEOUT_SECONDS COMMAND...
 wait_for() {
   local desc=$1 timeout=$2; shift 2
   for ((i = 0; i < timeout * 2; i++)); do
@@ -34,7 +31,6 @@ wait_for() {
   die "$desc not ready after ${timeout}s (logs in .run/)"
 }
 
-# wait_for_log NAME DESCRIPTION TIMEOUT PATTERN: only for processes this script started (fresh log)
 wait_for_log() {
   local pid="$RUN/$1.pid"
   [ -f "$pid" ] && kill -0 "$(cat "$pid")" 2>/dev/null || return 0
@@ -45,7 +41,6 @@ temporal_ready() {
   [ "$(docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' "$(docker compose ps -aq temporal-namespace)")" = "exited 0" ]
 }
 
-# start NAME PATTERN COMMAND...: run COMMAND detached unless a process matching PATTERN is up
 start() {
   local name=$1 pattern=$2; shift 2
   if pgrep -f "$pattern" >/dev/null; then
@@ -58,6 +53,6 @@ start() {
   echo "  $name started (.run/$name.log)"
 }
 
-stop_process() { # NAME PATTERN
+stop_process() {
   if pkill -f "$2"; then echo "stopped $1"; else echo "$1 not running"; fi
 }

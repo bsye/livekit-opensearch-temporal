@@ -21,19 +21,14 @@ Never say you have no information about the user's past without calling recall.
 If the user corrects a reminder or says undo, cancel it (and set the corrected one).
 The current local time is ${now.toTimeString().slice(0, 5)}, ${now.toDateString()}.`
 
-const LOCAL_API_KEY = 'local' // the OpenAI client requires one; local servers ignore it
+const LOCAL_API_KEY = 'local'
 
-// Turn-taking. VAD reports end of speech after VAD_SILENCE_MS; the audio turn detector then decides
-// from intonation whether the user is done or pausing. Silence alone either split sentences at
-// natural pauses or, tuned longer, slowed every reply.
 const VAD_SILENCE_MS = 300
 const ENDPOINTING_MIN_DELAY_MS = 300
 const ENDPOINTING_MAX_DELAY_MS = 2500
-// Only real speech interrupts the agent, not "okay" or a blip of echo.
 const INTERRUPTION_MIN_MS = 600
 const INTERRUPTION_MIN_WORDS = 2
 
-/** STT → LLM → TTS, all on local models. */
 export default defineAgent({
   prewarm: async (proc: JobProcess) => {
     proc.userData.vad = await silero.VAD.load({ minSilenceDuration: VAD_SILENCE_MS })
@@ -56,7 +51,7 @@ export default defineAgent({
         baseURL: env('LLM_BASE_URL'),
         apiKey: LOCAL_API_KEY,
         model: env('LLM_MODEL'),
-        reasoningEffort: 'none', // thinking adds seconds per turn
+        reasoningEffort: 'none',
       }),
       tts: new openai.TTS({
         baseURL: env('SPEECH_BASE_URL'),
@@ -65,11 +60,9 @@ export default defineAgent({
         voice: env('TTS_VOICE') as openai.TTSVoices,
       }),
       turnHandling: {
-        // dev mode defaults to v1, which only runs on LiveKit Cloud
         turnDetection: new inference.TurnDetector({ version: 'v1-mini' }),
         endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS, maxDelay: ENDPOINTING_MAX_DELAY_MS },
         interruption: { mode: 'vad', minDuration: INTERRUPTION_MIN_MS, minWords: INTERRUPTION_MIN_WORDS },
-        // the LLM starts on the final transcript, but TTS waits for the confirmed turn, or discarded drafts get spoken
         preemptiveGeneration: { enabled: true, preemptiveTts: false },
       },
     })
@@ -83,7 +76,6 @@ export default defineAgent({
     )
 
     const userTurns: string[] = []
-    // transcripts can arrive after the user left, when the room no longer lists them
     let lastUser = 'user'
     const currentUser = () => (lastUser = ctx.room.remoteParticipants.values().next().value?.identity ?? lastUser)
     let answeringFromMemory = false

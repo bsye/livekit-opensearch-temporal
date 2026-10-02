@@ -1,4 +1,3 @@
-// Test utterances spoken by the cascade's TTS in another voice, resampled to 16 kHz and cached.
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dataPath, env } from '@voice/config'
@@ -24,7 +23,6 @@ export async function speak(text: string): Promise<Int16Array> {
   return pcm
 }
 
-/** Mono samples in [-1, 1] from a PCM16 or float32 WAV. */
 function parseWav(b: Buffer): { samples: Float32Array; rate: number } {
   let off = 12
   let rate = 0,
@@ -54,7 +52,6 @@ function parseWav(b: Buffer): { samples: Float32Array; rate: number } {
   throw new Error('wav without data chunk')
 }
 
-/** Linear interpolation: crude, but fine for a model's input. */
 function resample({ samples, rate }: { samples: Float32Array; rate: number }, to: number): Int16Array {
   const n = Math.floor((samples.length * to) / rate)
   const out = new Int16Array(n)

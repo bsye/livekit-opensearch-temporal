@@ -1,17 +1,3 @@
-"""Local Laya decision server (MLX, Apple GPU) with TypeSafe Jev's request/response shape.
-
-    POST /v1/systemone  {"state": "...", "questions": {"name": {"type": "noul"|"choice"|"score", ...}}}
-                     -> {"answers": {...}, "model": "...", "latency_ms": 4.1}
-    POST /v1/scan       {"states": ["...", ...], "question": "yes/no question"}
-                     -> {"scores": [P(yes) per state], "latency_ms": ...}
-    GET  /health
-
-/v1/scan is the parallel scan for conversation memory: one noul question over many states,
-batched on the GPU (~0.5ms per state vs ~4ms one at a time).
-
-Single-threaded on purpose: one model instance, requests take ~5ms, and MLX streams
-aren't meant to be shared across threads.
-"""
 import json
 import os
 import time
@@ -26,10 +12,8 @@ from laya_mlx.agent import collate_items, temp_bucket
 MODEL = os.environ.get("LAYA_MODEL", "aac6fef/laya-multilingual-mlx")
 PORT = int(urlparse(os.environ.get("LAYA_BASE_URL", "http://localhost:8100")).port or 8100)
 
-SCAN_BATCH = 64  # throughput plateaus here on an M-series GPU (services/laya benchmarks)
-# Long states (LongMemEval turns run to ~1k tokens) make 64-item batches huge; cap tokens too
+SCAN_BATCH = 64
 SCAN_BATCH_TOKENS = 16384
-# MLX keeps freed buffers cached per shape; scans see many shapes, so bound the cache
 mx.set_cache_limit(int(os.environ.get("LAYA_CACHE_LIMIT_GB", "2")) << 30)
 
 agent = laya.load(MODEL)
@@ -57,7 +41,7 @@ class Handler(BaseHTTPRequestHandler):
         start = time.perf_counter()
         try:
             result = agent.predict(state, questions)
-        except Exception as err:  # bad question schema etc.
+        except Exception as err:
             return self.reply(422, {"error": str(err)})
         latency = round((time.perf_counter() - start) * 1000, 1)
         self.reply(200, {"answers": result["answers"], "model": MODEL, "latency_ms": latency})
@@ -84,12 +68,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def log_message(self, fmt, *args):  # one compact line per request
+    def log_message(self, fmt, *args):
         print(f"{self.command} {self.path} {args[1] if len(args) > 1 else ''}", flush=True)
 
 
 def scan(states, question):
-    """P(yes) of one noul question for each state, decoded exactly as agent.predict does."""
     q = {"q": {"type": "noul", "instructions": question}}
     items = [agent.prepare(state if isinstance(state, str) else json.dumps(state), q)[0][0] for state in states]
     scores = []
@@ -111,7 +94,6 @@ def scan(states, question):
 
 
 def batches(items):
-    """Consecutive batches of at most SCAN_BATCH items and SCAN_BATCH_TOKENS padded tokens."""
     batch, longest = [], 0
     for item in items:
         n = len(item["ids"])
@@ -125,7 +107,6 @@ def batches(items):
 
 
 if __name__ == "__main__":
-    # MLX compiles per batch shape on first use; warm the common scan shapes before serving
     for n in (1, SCAN_BATCH):
         scan(["User: warm up. Assistant: ok."] * n, "Is this a test?")
     print(f"laya ready on :{PORT} ({MODEL})", flush=True)

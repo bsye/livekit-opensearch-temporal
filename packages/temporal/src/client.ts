@@ -14,14 +14,10 @@ export async function connectTemporal(): Promise<Client> {
 
 const roomAttributes = (roomName?: string) => (roomName ? [{ key: RoomName, value: roomName }] : [])
 
-/**
- * Signal the room's workflow, starting it if needed: webhooks and agents race, whoever arrives first
- * starts it. Returns false when the session has already closed and the signal was dropped.
- */
 export async function signalRoom(client: Client, room: RoomRef, signal: RoomSignal): Promise<boolean> {
   try {
     await client.workflow.signalWithStart(roomSession, {
-      workflowId: room.sid, // room names are reused, sids are unique per session
+      workflowId: room.sid,
       taskQueue: TASK_QUEUE,
       signal: signalLabel(signal),
       signalArgs: [signal],

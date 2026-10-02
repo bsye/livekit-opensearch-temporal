@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# One-time setup on an Apple Silicon Mac; safe to re-run.
-#   npm run setup                    asks which agents to fetch models for (cascade always)
-#   npm run setup -- --s2s --omni    same, without asking
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -22,7 +19,7 @@ done
 command -v brew >/dev/null || die "Homebrew is required: https://brew.sh"
 
 step "Tools (Homebrew)"
-brew_install() { # FORMULA [COMMAND]
+brew_install() {
   if command -v "${2:-$1}" >/dev/null; then echo "  $1 ok"; else brew install "$1"; fi
 }
 brew_install node
@@ -38,7 +35,7 @@ echo "  lm studio ok"
 
 step "Environment (.env)"
 [ -f .env ] || cp .env.example .env
-while IFS= read -r line; do # add keys introduced since .env was created
+while IFS= read -r line; do
   case "$line" in '' | \#*) continue ;; esac
   grep -q "^${line%%=*}=" .env || echo "$line" >>.env
 done <.env.example
@@ -59,7 +56,7 @@ if [ "$ASKED" = 0 ] && interactive; then
 fi
 
 step "Python sidecars (venvs + models)"
-prefetch() { # SERVICE REPO...
+prefetch() {
   local service=$1; shift
   (cd "services/$service" && . ../lib.sh && export HF_HUB_DISABLE_PROGRESS_BARS=1 && ensure_venv &&
     for repo in "$@"; do .venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('$repo')" >/dev/null; done)

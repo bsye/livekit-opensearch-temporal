@@ -8,7 +8,6 @@ const EXAMPLE_QUESTION = 'Question: What was the name of the restaurant I liked 
 const EXAMPLE_TERMS =
   'restaurant, Rome, Italy, dinner, trattoria, pizzeria, pasta, food, ate, meal, trip, vacation, recommend, favorite, loved'
 
-/** The words the user most likely used back then, so BM25 can match a paraphrased question. */
 export async function expandQuery(
   question: string,
   llm: { baseUrl: string; model: string } = { baseUrl: env('LLM_BASE_URL'), model: env('LLM_MODEL') },

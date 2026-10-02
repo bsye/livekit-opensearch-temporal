@@ -1,8 +1,3 @@
-/**
- * Can Laya tell from one user turn whether to search memory (past), leave it to the tools (action),
- * or just answer (chat)? Three phrasings, all fixed before running.
- *   npm run bench -w @bench/router
- */
 import { ask, type Question, ROUTE_QUESTION } from '@voice/laya'
 import { ACTION, CHAT, type Label, routerTurns } from './turns.js'
 
@@ -17,7 +12,6 @@ const PHRASINGS: Record<string, Question> = {
     instructions:
       'To answer well, does the assistant need something the user said in earlier conversations (their life, facts about them, or their preferences)?',
   },
-  // neutral keys: Laya's yes/no labels can dominate a noul question
   choice: ROUTE_QUESTION,
 }
 const CHOICES: Record<string, Label> = { A: 'past', B: 'action', C: 'chat' }

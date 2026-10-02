@@ -12,7 +12,6 @@ export const TOPICS = {
 } as const
 export type Topic = keyof typeof TOPICS
 
-/** One user turn (or several in a row) and the agent's reply. */
 export interface Exchange {
   roomSid: string
   roomName?: string
@@ -22,7 +21,6 @@ export interface Exchange {
   agentText: string
   startedAt: number
   endedAt: number
-  /** The reply came from memory: not new evidence, and never recalled as if the user had said it. */
   fromMemory?: boolean
 }
 
@@ -83,7 +81,6 @@ export function exchangeText(e: Pick<Exchange, 'userText' | 'agentText'>): strin
   return `User: ${e.userText}\nAssistant: ${e.agentText}`
 }
 
-/** Topic from a fixed taxonomy and whether it holds a task, in one Laya call. */
 export async function categorise(text: string): Promise<Pick<MemoryDoc, 'topic' | 'topicConfidence' | 'hasTask'>> {
   const { answers } = await ask(text, {
     topic: { type: 'choice', instructions: 'What is this conversation mainly about?', criteria: TOPICS },
@@ -101,7 +98,6 @@ export async function toMemoryDoc(e: Exchange): Promise<MemoryDoc> {
   return { ...e, text, ...(await categorise(text)) }
 }
 
-/** Idempotent: the id is derived from the room and the time of the reply. */
 export const docId = (e: Pick<Exchange, 'roomSid' | 'endedAt'>) => `${e.roomSid}-${e.endedAt}`
 
 export async function indexExchange(e: Exchange): Promise<MemoryDoc> {

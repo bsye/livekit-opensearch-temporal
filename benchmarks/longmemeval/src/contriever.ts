@@ -1,4 +1,3 @@
-// LongMemEval's flat-contriever baseline: masked mean pooling, dot product, 512-token truncation.
 import {
   AutoModel,
   AutoTokenizer,
@@ -15,7 +14,6 @@ env.localModelPath = `${dataPath('models')}/`
 const BATCH = 32
 let tokenizer: PreTrainedTokenizer
 let model: PreTrainedModel
-// LongMemEval_M reuses sessions across questions: embed each distinct text once
 const cache = new Map<string, Float32Array>()
 const CACHE_MAX = 400_000
 
@@ -26,7 +24,6 @@ export async function loadContriever(): Promise<void> {
 
 export async function embed(texts: string[]): Promise<Float32Array[]> {
   const out: (Float32Array | undefined)[] = texts.map((t) => cache.get(t))
-  // sorted by length so each batch pads to similar lengths
   const missing = [...new Set(texts.filter((_, i) => !out[i]))].sort((a, b) => a.length - b.length)
   for (let s = 0; s < missing.length; s += BATCH) {
     const batch = missing.slice(s, s + BATCH)
@@ -52,7 +49,6 @@ export async function embed(texts: string[]): Promise<Float32Array[]> {
   return texts.map((t, i) => out[i] ?? cache.get(t)!)
 }
 
-/** Ranking of docs by dot product with the query, highest first (np.argsort(...)[::-1] tie order). */
 export async function contrieverRanking(corpus: string[], query: string): Promise<number[]> {
   const [q] = await embed([query])
   const docs = await embed(corpus)

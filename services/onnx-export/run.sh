@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# One-time ONNX exports of two benchmark-only models (no ONNX weights on the Hub):
-#   services/onnx-export/run.sh contriever|sparse
 cd "$(dirname "$0")" && . ../lib.sh
 case "${1:-}" in
   contriever) script=contriever.py; out=contriever ;;

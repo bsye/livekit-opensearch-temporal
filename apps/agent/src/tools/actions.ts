@@ -21,7 +21,6 @@ export interface EmailArgs {
   body: string
 }
 
-/** The side effects behind both agents' tools. Each returns what the model should be told. */
 export function createActions({ temporal, room, user, auditor }: ActionDeps) {
   const reminders: { workflowId: string; text: string; when: string }[] = []
 

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { expandQuery } from '@voice/memory'
 
-/** The product's query expansion, cached per question so reruns don't call the LLM again. */
 export class QueryExpander {
   private cache: Record<string, string>
 

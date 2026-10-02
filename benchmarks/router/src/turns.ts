@@ -8,7 +8,6 @@ export interface Turn {
   group: string
 }
 
-/** 220 turns: the 100 library questions + 20 conversational ones need memory; 50 actions; 50 chat. */
 export function routerTurns(): Turn[] {
   return [
     ...libraryQuestions().map((q) => ({ text: q.question, label: 'past' as const, group: `library:${q.type}` })),
@@ -18,7 +17,6 @@ export function routerTurns(): Turn[] {
   ]
 }
 
-// Some turns are written the way speech-to-text returns them: lowercase, no punctuation.
 export const PAST_EXTRA = [
   'What did we talk about yesterday?',
   "Did I tell you about my sister's wedding?",

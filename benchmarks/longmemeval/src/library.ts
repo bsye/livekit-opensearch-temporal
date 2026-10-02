@@ -11,7 +11,6 @@ export interface LibraryQuestion {
   answer: string
 }
 
-/** The questions written by load-library.ts; each is answerable from the loaded memory. */
 export function libraryQuestions(): LibraryQuestion[] {
   return readFileSync(LIBRARY_SHEET, 'utf8')
     .split('\n')

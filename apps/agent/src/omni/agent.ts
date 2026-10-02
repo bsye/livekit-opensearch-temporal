@@ -23,33 +23,23 @@ import { RecallPrefetch } from '../tools/prefetch.js'
 import { exampleChatCtx, instructions } from './prompt.js'
 import { TurnAudio } from './turn-audio.js'
 
-const LOCAL_API_KEY = 'local' // the OpenAI client requires one; local servers ignore it
+const LOCAL_API_KEY = 'local'
 
-/** A user message without the markers this agent adds to it. */
 const clean = (text: string) =>
   text
     .replace(/\s*<audio:[0-9a-f]+>/g, '')
     .replace(/\s*<memory>[\s\S]*?<\/memory>/g, '')
     .trim()
 
-// Memory query expansion (preference questions) uses the same model: no second LLM loaded
 process.env.LLM_BASE_URL = env('OMNI_BASE_URL')
 process.env.LLM_MODEL = env('OMNI_MODEL')
 
-// Turn-taking as in the cascade (see cascade/agent.ts)
 const VAD_SILENCE_MS = 300
 const ENDPOINTING_MIN_DELAY_MS = 300
 const ENDPOINTING_MAX_DELAY_MS = 2500
 const INTERRUPTION_MIN_MS = 600
 const INTERRUPTION_MIN_WORDS = 2
 
-/**
- * Hybrid: Qwen3-Omni (services/omni) hears each user turn as audio and answers in text with tool
- * calls, including when to search memory (recall); Kokoro speaks it. Parakeet still transcribes every turn: LiveKit's turn detector, the chat
- * history, Temporal and memory work on text. The audio rides along as an <audio:id> marker in the
- * user message, which the sidecar swaps for the recording (OpenAI's chat format has no audio input
- * in agents-js).
- */
 class OmniAgent extends voice.Agent {
   constructor(
     opts: ConstructorParameters<typeof voice.Agent>[0],
@@ -58,12 +48,10 @@ class OmniAgent extends voice.Agent {
     super(opts)
   }
 
-  // record the user's audio on its way to speech-to-text
   async sttNode(audio: ReadableStream<AudioFrame> | AsyncIterable<AudioFrame>, settings: voice.ModelSettings) {
     return voice.Agent.default.sttNode(this, this.turnAudio.tap(audio), settings)
   }
 
-  // the turn is final: hand its audio to the model (whether to search memory is the model's call)
   async onUserTurnCompleted(_chatCtx: llm.ChatContext, newMessage: llm.ChatMessage) {
     const id = await this.turnAudio.upload().catch((err) => {
       console.error('turn audio upload failed; the model reads the transcript instead', err)
@@ -108,7 +96,6 @@ export default defineAgent({
         turnDetection: new inference.TurnDetector({ version: 'v1-mini' }),
         endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS, maxDelay: ENDPOINTING_MAX_DELAY_MS },
         interruption: { mode: 'vad', minDuration: INTERRUPTION_MIN_MS, minWords: INTERRUPTION_MIN_WORDS },
-        // off: the audio is attached when the turn completes, which would discard every early draft
         preemptiveGeneration: { enabled: false },
       },
     })
@@ -165,7 +152,6 @@ export default defineAgent({
       if (newState === 'speaking') turnAudio.speechStarted(createdAt)
     })
 
-    // fixed, not generated: the model would continue from the seeded examples instead of greeting
     session.say('Hi! How can I help you today?')
   },
 })

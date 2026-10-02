@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Starts whatever isn't running yet and opens a meeting the agent joins.
-#   npm start [-- room [identity]]          defaults: meet-<HHMMSS>, $USER
-#   AGENT=cascade|s2s|omni npm start         skip the agent menu (no menu outside a terminal: cascade)
-#   NO_OPEN=1 npm start                      print the link instead of opening the browser
-# Native processes run detached, logs in .run/. Stop with `npm stop`.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -31,7 +26,6 @@ wait_for "Temporal namespace" 120 temporal_ready
 echo "  LiveKit and Temporal ready"
 
 if [ "$AGENT" = omni ]; then
-  # omni doesn't use the LLM: free its memory for Qwen3-Omni
   "$LMS" unload "$LLM_MODEL" >/dev/null 2>&1 && echo "  unloaded $LLM_MODEL (not used by omni)" || true
 else
   step "LLM (LM Studio, $LLM_MODEL)"
@@ -43,10 +37,8 @@ fi
 
 step "Native services"
 for other in $AGENTS; do
-  # one agent per room: any other kind would join it too
   [ "$other" = "$AGENT" ] || stop_process "$other agent" "$(agent_entry "$other")" >/dev/null
 done
-# the big models of the other agents would only push this one into swap
 [ "$AGENT" = s2s ] || stop_process voicechat 'services/voicechat/server.py' >/dev/null
 [ "$AGENT" = omni ] || stop_process omni 'services/omni/server.py' >/dev/null
 start laya 'services/laya/server.py' services/laya/run.sh

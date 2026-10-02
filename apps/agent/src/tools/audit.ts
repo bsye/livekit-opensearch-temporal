@@ -3,10 +3,6 @@ import type { ActionDecision } from '@voice/temporal'
 
 const FLAG_BELOW = 0.5
 
-/**
- * Laya scores each committed action against what the user asked, off the critical path. Flags are
- * for review (and labelled data to fine-tune Laya later), never a block: zero-shot it isn't reliable enough.
- */
 export class ActionAuditor {
   constructor(
     private participant: () => string,

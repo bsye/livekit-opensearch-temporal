@@ -1,7 +1,3 @@
-/**
- * Learned sparse retrieval with OpenSearch's doc-only model: documents are expanded into weighted
- * vocabulary terms at index time (rank_features); queries only need the tokenizer and IDF weights.
- */
 import { readFileSync } from 'node:fs'
 import {
   AutoModel,
@@ -22,7 +18,6 @@ let model: PreTrainedModel
 let vocab: string[]
 let idf: Map<number, number>
 let special: Set<number>
-// distinct text → features as a JSON string (LongMemEval_M repeats each turn ~4x)
 const cache = new Map<string, string>()
 
 export async function loadSparse(): Promise<void> {
@@ -36,9 +31,8 @@ export async function loadSparse(): Promise<void> {
   special = new Set(['[CLS]', '[SEP]', '[PAD]', '[MASK]', '[UNK]'].map((t) => vocab.indexOf(t)))
 }
 
-const key = (id: number) => `t${id}` // rank_features keys can't contain dots; use token ids
+const key = (id: number) => `t${id}`
 
-/** Sparse document vectors as JSON {"t<tokenId>": weight, ...}, cached per distinct text. */
 export async function encodeDocs(texts: string[]): Promise<string[]> {
   const missing = [...new Set(texts.filter((t) => !cache.has(t)))].sort((a, b) => a.length - b.length)
   for (let s = 0; s < missing.length; s += BATCH) {
@@ -61,7 +55,6 @@ export async function encodeDocs(texts: string[]): Promise<string[]> {
   return texts.map((t) => cache.get(t)!)
 }
 
-/** Query terms weighted by the model's IDF (no model inference at query time). */
 export function queryWeights(query: string): Record<string, number> {
   const ids = (tokenizer(query, { add_special_tokens: false }).input_ids as Tensor).tolist() as unknown as number[][]
   const weights: Record<string, number> = {}

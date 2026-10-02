@@ -1,11 +1,3 @@
-/**
- * LongMemEval retrieval benchmark: same corpus, labels and metrics as the official run_retrieval.py.
- * Retrievers are listed in ../README.md. The dataset is streamed (LongMemEval_M is 2.7 GB) and runs
- * are resumable: each question's result is appended to a progress file and skipped on rerun.
- *
- *   npm run bench -w @bench/longmemeval -- --dataset longmemeval_m_cleaned --methods bm25,minilm:bm25
- *        [--granularity turn|session] [--rerank-depth N] [--rerank-max-length tokens] [--limit N] [--tag name] [--fresh]
- */
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { dataPath, env } from '@voice/config'
@@ -72,10 +64,9 @@ const ALL_METHODS = [
   'bm25+mqe',
   'minilm:bm25+mqe',
 ] as const
-// Fixed before running, never tuned on the test questions.
 const EXPANSION_WEIGHT = 0.5
-const PREFERENCE_WEIGHT = 0.5 // added to the per-question max-normalised BM25 score
-const PREFERENCE_QUESTION_MIN = 0.5 // Laya P(question asks for preferences) needed to apply the tags
+const PREFERENCE_WEIGHT = 0.5
+const PREFERENCE_QUESTION_MIN = 0.5
 type Method = (typeof ALL_METHODS)[number]
 
 const arg = (name: string, fallback: string) => {
@@ -103,7 +94,6 @@ if (methods.includes('sparse')) {
   await indexSparseCorpus()
 }
 const expander = new QueryExpander(new URL(`${dataset}.expansions.json`, outDir))
-// Qwen3-Omni (the omni agent's model) writing keywords, or 1-3 queries of its own through a recall tool call
 const omni = () => ({ baseUrl: env('OMNI_BASE_URL'), model: env('OMNI_MODEL') })
 const omniExpander = methods.some((m) => m.endsWith('bm25+oqe'))
   ? new QueryExpander(new URL(`${dataset}.omni-expansions.json`, outDir), omni())
@@ -214,14 +204,14 @@ async function evaluate(q: Question): Promise<Row> {
     row.scanned.bm25 = 0
   }
   if (methods.includes('bm25+qe')) {
-    const expansion = await expander.expand(q.question_id, q.question) // LLM time is reported separately
+    const expansion = await expander.expand(q.question_id, q.question)
     t = Date.now()
     rankings['bm25+qe'] = complete(await bm25Ranking(q, position, false, expansion), corpus.length)
     row.latencyMs['bm25+qe'] = Date.now() - t
     row.scanned['bm25+qe'] = 0
   }
   if (omniExpander && methods.some((m) => m.endsWith('bm25+oqe'))) {
-    const expansion = await omniExpander.expand(q.question_id, q.question) // LLM time is reported separately
+    const expansion = await omniExpander.expand(q.question_id, q.question)
     t = Date.now()
     rankings['bm25+oqe'] = complete(await bm25Ranking(q, position, false, expansion), corpus.length)
     row.latencyMs['bm25+oqe'] = Date.now() - t
@@ -230,7 +220,6 @@ async function evaluate(q: Question): Promise<Row> {
   if (queryWriter && methods.some((m) => m.endsWith('mq'))) {
     const queries = await queryWriter.queries(q.question_id, q.question)
     t = Date.now()
-    // the question itself plus each query the model wrote, searched in parallel and merged by rank
     const lists = await Promise.all(
       [q.question, ...queries].map((text) => bm25Ranking({ ...q, question: text }, position, false)),
     )
@@ -242,7 +231,6 @@ async function evaluate(q: Question): Promise<Row> {
     row.scanned.mq = 0
   }
   if (queryWriter && methods.some((m) => m.endsWith('bm25+mqe'))) {
-    // the same model-written queries, used as expansion terms next to the question (weight 0.5)
     const queries = await queryWriter.queries(q.question_id, q.question)
     t = Date.now()
     rankings['bm25+mqe'] = complete(
@@ -259,7 +247,6 @@ async function evaluate(q: Question): Promise<Row> {
     row.scanned.rm3 = 0
   }
   for (const [e, embedder] of Object.entries(embedders)) {
-    // document embedding is index-time work: done first, not timed
     await embedder.embedDocs(corpus.map((d) => d.text))
     t = Date.now()
     const dense = await embedder.ranking(
@@ -276,7 +263,7 @@ async function evaluate(q: Question): Promise<Row> {
     const hm = `rrf-bm25+${e}` as Method
     if (methods.includes(hm)) {
       rankings[hm] = rrf([bm25, dense], corpus.length)
-      row.latencyMs[hm] = Math.max(bm25Ms, denseMs) // the two retrievers run in parallel
+      row.latencyMs[hm] = Math.max(bm25Ms, denseMs)
       row.scanned[hm] = corpus.length
     }
     const qm = `rrf-bm25qe+${e}` as Method
@@ -376,7 +363,6 @@ async function bm25Ranking(
   return hits.map((h) => position.get(h._source.docId)!).filter((i) => i !== undefined)
 }
 
-/** BM25 scores by corpus position, in BM25 rank order (optionally with expansion terms). */
 async function bm25Scores(
   q: Question,
   position: Map<string, number>,
@@ -395,7 +381,6 @@ async function bm25Scores(
   )
 }
 
-/** BM25, then RM3 feedback from its top hits, then BM25 with the expanded weighted term query. */
 async function rm3Ranking(q: Question, position: Map<string, number>): Promise<number[]> {
   const filter = [{ term: { qid: q.question_id } }]
   const first = (await post(`${OPENSEARCH}/${index}/_search`, {
@@ -412,7 +397,6 @@ async function rm3Ranking(q: Question, position: Map<string, number>): Promise<n
   return res.hits.hits.map((h) => position.get(h._source.docId)!).filter((i) => i !== undefined)
 }
 
-/** Dot product of IDF-weighted query tokens with the documents' rank_features. */
 async function sparseRanking(q: Question, position: Map<string, number>): Promise<number[]> {
   const weights = queryWeights(q.question)
   const res = await post(`${OPENSEARCH}/${index}-sparse/_search`, {
@@ -442,7 +426,6 @@ async function layaScan(docs: Doc[], question: string): Promise<number[]> {
   return scores
 }
 
-/** Stable sort of indices by score, highest first. */
 function byScore(indices: number[], scores: number[]): number[] {
   return indices
     .map((idx, i) => ({ idx, s: scores[i], i }))
@@ -450,7 +433,6 @@ function byScore(indices: number[], scores: number[]): number[] {
     .map((x) => x.idx)
 }
 
-/** Documents a retriever didn't return go after its ranking, in corpus order (needed for turn→session k). */
 function complete(ranking: number[], n: number): number[] {
   const seen = new Set(ranking)
   return [...ranking, ...Array.from({ length: n }, (_, i) => i).filter((i) => !seen.has(i))]
@@ -470,7 +452,6 @@ function metricsFor(ranking: number[], correct: string[], ids: string[]): Record
   return out
 }
 
-/** Stream the dataset's top-level array one question at a time. */
 async function* questions(): AsyncGenerator<Question> {
   const pipeline = createReadStream(dataFile).pipe(StreamArray.withParser())
   for await (const { value } of pipeline as AsyncIterable<{ key: number; value: Question }>) yield value

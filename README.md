@@ -5,7 +5,8 @@ the Apple GPU for speech and language, Temporal as the durable record of every s
 conversation memory the agent can search while it talks.
 
 The project started from one assumption and was built step by step to test it. Every step below
-comes with the benchmark that decided it.
+comes with the benchmark that decided it; [docs/experiments.md](docs/experiments.md) is the full log
+of what was tried, including what didn't work.
 
 ## The assumption
 
@@ -64,11 +65,17 @@ every action the agent took. Temporal provides that:
   `room_finished`. A small translator verifies each webhook and signal-with-starts one workflow per
   room session (id = room sid). Whoever arrives first, webhook or agent, creates it; duplicates are
   dropped by event id; a grace period catches late events; a closed session can't be reopened.
-- **One timeline per room.** Each participant gets a child workflow, so the Temporal UI shows a lane
-  per actor. Signals are named after who did what (`👤 dalbi · track_published (AUDIO)`, `🤖 agent: "…"`,
-  `⏱ voice-to-voice 1500ms`), so the history reads as the conversation itself. Live state is a query away.
+- **One row per turn.** The room's timeline holds the webhooks (`👤 dalbi · track_published (AUDIO)`)
+  and one `conversationTurn` child per exchange, labelled with the whole turn at a glance:
+  `💬 3 · 👤 "Remind me…" → 🤖 "Done…" · 🧠 · 🛠 set_reminder · ⏱ 1.3s`. Inside a turn, each step is
+  its own row: the memory route, every tool call and its result, approvals and Laya audits, and
+  indexing the exchange into memory. The room's details pane keeps a table of participants and the
+  last turns, and its full state is a query away.
+- **Each turn shows where its time went.** Your side (how long you spoke, recognition, the end-of-turn
+  wait), the memory search and each tool call with its duration, then the agent's side (first token,
+  first audio, voice to voice).
 - **Side effects are durable.** A reminder is a workflow with a durable timer, so it survives
-  restarts and cancelling it is the undo. Indexing each exchange into memory is a retried activity
+  restarts and cancelling it is the undo. Indexing an exchange into memory is a retried activity
   whose failure never fails the call.
 
 ### 3. Laya as an action gate: rejected
@@ -124,10 +131,10 @@ Voice testing on that library found three problems, all fixed:
 - **Near misses blended into answers.** Hits the re-ranker scores below 0 are dropped, and "I don't
   remember" is preferred over a confident mix of unrelated messages.
 
-### 6. When to search: Laya's real use case
+### 6. When to search memory: Laya, then the model
 
-With a cascade, the LLM decides when to call `recall`. A speech-to-speech model rarely does, so
-something has to decide per turn ([results](benchmarks/router/RESULTS.md), 220 turns: 120 memory,
+With a cascade, the LLM decides when to call `recall`. Speech models rarely did, so we tried deciding
+per turn outside the model ([results](benchmarks/router/RESULTS.md), 220 turns: 120 memory,
 50 action, 50 chat):
 
 | decision | memory turns caught | other turns searched | cost |
@@ -135,24 +142,36 @@ something has to decide per turn ([results](benchmarks/router/RESULTS.md), 220 t
 | Laya yes/no question | 1–13% | 0% | ~5 ms |
 | Laya 3-way choice (past / action / chat) | 71% | 14% | ~5 ms |
 | re-ranker relevance only | 47% | 23% | ~45 ms |
-| **Laya OR (first person AND relevant match)** | **84%** | **21%** | ~70 ms, in parallel |
+| Laya OR (first person AND relevant match) | 84% | 21% | ~70 ms, in parallel |
+
+The last rule needed regexes on top ("you told me", named people), and every live failure added
+another. So we tested the obvious alternative: give the model (Qwen3-Omni) the real tools and let it
+decide. Told in prose to search memory, it searched for 19–31% of memory questions. Shown two worked
+examples of a recall call in its conversation, it searched for **89%**, and wrongly for only **7%** of
+other turns, with no rules at all. The omni agent now works this way.
 
 ### Verdict
 
 The assumption holds for retrieval: a search engine over well-structured text, plus a small
 re-ranker, is within a few points of the best embedding stack at a fraction of the latency and
 infrastructure. Laya's place is real but narrower than expected. It's poor at ranking and too
-confident to block actions alone, but fast and accurate at fixed-label classification: routing
-questions, routing turns, labelling exchanges, auditing actions.
+confident to block actions alone, and as a per-turn router it lost to the model once the model was
+shown an example. It still pays off for fixed-label work: flagging preference questions inside
+recall, labelling exchanges, auditing actions.
+
+A last round asked whether the model can also write the search. Its tool-call queries, appended to the
+question, lift recall_any@5 from 0.862 to 0.874 with no extra model call, but they don't replace the
+re-ranker (without MiniLM, top-1 falls from 0.65 to 0.43–0.56). Topic filters lost a quarter of the
+answers. Details in [docs/experiments.md](docs/experiments.md).
 
 ## Architecture
 
 ```
  browser (Meet) ──wss──▶ Caddy ──▶ LiveKit ──webhooks──▶ translator ──signals──▶ Temporal
                                      ▲                                             │
-                                     │ audio                     room / participant workflows,
-                                     ▼                           reminders, email, memory indexing
-                                   agent ──signals (transcript, metrics, actions)──┘
+                                     │ audio                  roomSession ─▶ conversationTurn per exchange
+                                     ▼                        reminders, email, memory indexing
+                                   agent ──signals (turns, metrics)──────────────────┘
                           ┌──────────┼───────────────┬──────────────┐
                     mlx-audio     LM Studio         Laya       OpenSearch (memory)
                    (STT + TTS)     (LLM)      (decision model)    + MiniLM re-ranker
@@ -160,11 +179,11 @@ questions, routing turns, labelling exchanges, auditing actions.
 
 ```
 apps/
-  agent/            LiveKit agent: cascade/ (STT → LLM → TTS), s2s/ (speech-to-speech), tools/
+  agent/            LiveKit agents: cascade/, s2s/, omni/; tools/, memory routing, Temporal reporting
   translator/       LiveKit webhooks → Temporal
   worker/           Temporal worker; backfill-memory script
 packages/
-  temporal/         workflows, activities, client, signal labels
+  temporal/         workflows (room, turn, reminder, email), activities, client, labels
   memory/           OpenSearch store, recall pipeline, re-ranker, query expansion
   laya/             client for the Laya sidecar (ask, scan, route)
   voicechat/        client for the VoiceChat sidecar
@@ -210,7 +229,7 @@ link. Logs are in `.run/`.
 | service | address |
 |---|---|
 | LiveKit (browsers / backends) | `wss://livekit.localhost` / `ws://localhost:7880` |
-| Temporal UI | http://localhost:8233 (filter: `RoomName="meet-…"`) |
+| Temporal UI | http://localhost:8233 (filter: `RoomName="meet-…"`; `npm start` prints the link) |
 | OpenSearch Dashboards | http://localhost:5602 (index `conversation-memory`) |
 | LM Studio · mlx-audio · Laya | `:1234` · `:8000` · `:8100` |
 
@@ -223,7 +242,8 @@ egress and ingress configs from it.
 |---|---|---|---|
 | LongMemEval | which retriever finds the right past message? | `npm run bench -w @bench/longmemeval` | [README](benchmarks/longmemeval/README.md) |
 | action gate | can Laya block wrong tool calls? | `services/laya/.venv/bin/python services/laya/eval_gate.py` | [RESULTS](benchmarks/action-gate/RESULTS.md) |
-| router | can Laya tell when to search memory? | `npm run bench\|gate\|combined -w @bench/router` | [RESULTS](benchmarks/router/RESULTS.md) |
+| router | who should decide when to search memory? | `npm run bench\|gate\|combined\|omni -w @bench/router` | [RESULTS](benchmarks/router/RESULTS.md) |
+| topics | do topic filters help recall? | `npm run topics -w @bench/longmemeval` | [RESULTS](benchmarks/longmemeval/RESULTS.md) |
 | voicechat | speech-to-speech vs cascade on tools and memory | `npm run bench -w @bench/voicechat` | in progress |
 
 The LongMemEval datasets go in `data/benchmarks/longmemeval/` (see the
@@ -239,9 +259,10 @@ loads the voice-test library and writes the question sheet the router and voicec
   step 6, which forces recall in and drops anything the model had started saying. On smoke runs a
   model step takes 77–86 ms p50, at the edge of real time. Next is the full comparison against the
   cascade (`benchmarks/voicechat`) on action, chat and memory turns.
-- **Hybrid agent** (`AGENT=omni`, in progress). Qwen3-Omni hears the user's audio directly and
-  streams text from ~130 ms; Kokoro speaks it. The goal is speech understanding without the
-  transcription step, keeping the cascade's tools.
+- **Hybrid agent** (`AGENT=omni`). Qwen3-Omni hears the user's audio and decides itself when to
+  search memory; Kokoro speaks. Next: `recall` takes the model's own queries as expansion terms, and
+  Laya's preference check leaves recall (it waits ~2.5 s for the GPU behind Qwen3-Omni). Estimated
+  ~1.3 s from end of turn to speech on a memory question, of which the search is 60–90 ms.
 - **Fine-tune Laya on this domain.** The router and audit misses are narrow, fixed-label tasks,
   the kind Laya's authors report fine-tuning lifts from ~0.36 to ~0.77+. The audit flags already
   collected in Temporal are the start of that dataset.

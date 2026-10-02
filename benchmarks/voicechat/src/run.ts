@@ -24,7 +24,7 @@ import {
   VoiceChatSession,
   type ToolCall,
 } from '@voice/voicechat';
-import { speak } from './speech.js';
+import { speak } from '@bench/router/speech';
 
 const VOICECHAT = env('VOICECHAT_URL');
 const LLM = env('LLM_BASE_URL');

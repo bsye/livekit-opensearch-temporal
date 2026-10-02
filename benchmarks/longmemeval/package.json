@@ -8,7 +8,8 @@
   "scripts": {
     "bench": "node --max-old-space-size=6144 --env-file=../../.env --import tsx src/run.ts",
     "load-library": "node --max-old-space-size=6144 --env-file=../../.env --import tsx src/load-library.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "topics": "node --env-file=../../.env --import tsx src/topics.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

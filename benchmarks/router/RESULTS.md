@@ -47,3 +47,30 @@ The speech-to-speech agent uses the bold rule, plus a regex for explicit referen
 me", "last time"). False alarms are cheap there: a "how do I boil an egg" that gets memory just ignores
 it, while a missed memory turn gets "I don't know". The remaining misses are long LongMemEval questions
 that phrase the reference to the past in the second half of the sentence.
+
+## Letting the model decide (`npm run omni -w @bench/router`)
+
+Instead of routing outside the model: Qwen3-Omni gets the agent's real tools (recall, set_reminder,
+cancel_reminder, send_email) and decides itself. Same 220 turns, spoken by Kokoro and transcribed by
+Parakeet as in a live call; three input modes: audio, audio + transcript, transcript only.
+
+| prompt | input | memory turns → recall | actions → action tool | chat → no tool | other turns → recall |
+|---|---|---|---|---|---|
+| plain instructions | audio | 27% | 2% | 100% | 1% |
+| plain instructions | audio + text | 31% | 4% | 100% | 0% |
+| plain instructions | text | 19% | 0% | 100% | 0% |
+| + one worked recall example | audio | 82% | 80% | 98% | 1% |
+| + one worked recall example | audio + text | 84% | 86% | 92% | 4% |
+| + one worked recall example | text | 84% | 86% | 98% | 2% |
+| + a second, preference example | audio + text | **89%** | 82% | 88% | 7% |
+| *reference: Laya OR (first person AND match >= 4)* | text | 84% | – | – | 21% |
+
+- Told in prose to "call recall first, every time", the model doesn't: it answers "I don't have
+  information about that". One worked example (a question → recall call → result → answer) fixes it.
+- With one example it calls recall for 97% of memory questions of every type except preference ones
+  ("can you recommend a show for me tonight?", 0/16): they don't read as questions about the past. A
+  second example (a recommendation that checks what the user likes) lifts them to 5/16.
+- Most of the remaining "false alarms" are recommendation requests ("recommend some podcasts about
+  history"), where checking the user's preferences is arguably right.
+- Compared with Laya plus hand-written rules: the same or better recall with a third of the false
+  alarms, and no regexes. Latency is a model call either way; the search itself starts early (prefetch).

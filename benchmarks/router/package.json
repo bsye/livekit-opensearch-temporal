@@ -3,17 +3,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./turns": "./src/turns.ts"
+    "./turns": "./src/turns.ts",
+    "./speech": "./src/speech.ts"
   },
   "scripts": {
     "bench": "node --env-file=../../.env --import tsx src/run.ts",
     "gate": "node --env-file=../../.env --import tsx src/gate.ts",
     "combined": "node --env-file=../../.env --import tsx src/combined.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "omni": "node --env-file=../../.env --import tsx src/omni.ts"
   },
   "dependencies": {
     "@bench/longmemeval": "*",
     "@voice/laya": "*",
-    "@voice/memory": "*"
+    "@voice/memory": "*",
+    "@voice/agent": "*",
+    "@voice/config": "*"
   }
 }

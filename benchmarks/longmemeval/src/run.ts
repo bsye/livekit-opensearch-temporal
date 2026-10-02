@@ -4,7 +4,7 @@
  * are resumable: each question's result is appended to a progress file and skipped on rerun.
  *
  *   npm run bench -w @bench/longmemeval -- --dataset longmemeval_m_cleaned --methods bm25,minilm:bm25
- *        [--granularity turn|session] [--rerank-depth N] [--limit N] [--tag name] [--fresh]
+ *        [--granularity turn|session] [--rerank-depth N] [--rerank-max-length tokens] [--limit N] [--tag name] [--fresh]
  */
 import { createReadStream, appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -15,6 +15,7 @@ import { Reranker, RERANKERS, type RerankerName } from '@voice/memory';
 import { bm25OkapiRanking } from './bm25okapi.js';
 import { contrieverRanking, loadContriever } from './contriever.js';
 import { QueryExpander } from './expansion.js';
+import { QueryWriter } from './multiquery.js';
 import { encodeDocs, loadSparse, queryWeights } from './sparse.js';
 import { PreferenceTags } from './preference.js';
 import { Embedder, EMBEDDERS, rrf } from './embeddings.js';
@@ -33,6 +34,7 @@ import {
 
 const OPENSEARCH = env('OPENSEARCH_URL');
 const DATA = dataPath('benchmarks', 'longmemeval');
+const RERANK_MAX_LENGTH = Number(process.argv.includes('--rerank-max-length') ? process.argv[process.argv.indexOf('--rerank-max-length') + 1] : 512);
 const RERANK_DEPTH = Number(process.argv.includes('--rerank-depth') ? process.argv[process.argv.indexOf('--rerank-depth') + 1] : 50);
 const ALL_METHODS = [
   'contriever', 'bm25-paper', 'bm25', 'bm25+qe', 'rm3',
@@ -41,6 +43,7 @@ const ALL_METHODS = [
   'bm25+pref', 'bm25+qe+pref', 'sparse', 'bm25-fuzzy', 'laya', 'bm25+laya',
   'minilm:bm25', 'minilm:bm25+qe', 'bge:bm25+qe', 'minilm:rrf-bm25qe+qwen3', 'bge:rrf-bm25qe+qwen3',
   'minilm:rrf-bm25qe+nomic', 'bge:rrf-bm25qe+nomic',
+  'bm25+oqe', 'minilm:bm25+oqe', 'mq', 'minilm:mq', 'bm25+mqe', 'minilm:bm25+mqe',
 ] as const;
 // Fixed before running, never tuned on the test questions.
 const EXPANSION_WEIGHT = 0.5;
@@ -73,11 +76,15 @@ if (methods.includes('sparse')) {
   await indexSparseCorpus();
 }
 const expander = new QueryExpander(new URL(`${dataset}.expansions.json`, outDir));
+// Qwen3-Omni (the omni agent's model) writing keywords, or 1-3 queries of its own through a recall tool call
+const omni = () => ({ baseUrl: env('OMNI_BASE_URL'), model: env('OMNI_MODEL') });
+const omniExpander = methods.some((m) => m.endsWith('bm25+oqe')) ? new QueryExpander(new URL(`${dataset}.omni-expansions.json`, outDir), omni()) : undefined;
+const queryWriter = methods.some((m) => m.endsWith('mq') || m.endsWith('mqe')) ? new QueryWriter(new URL(`${dataset}.omni-queries.json`, outDir), omni()) : undefined;
 const prefTags = new PreferenceTags(new URL(`${dataset}.preference-tags.json`, outDir));
 const rerankers = Object.fromEntries(
   (Object.keys(RERANKERS) as RerankerName[])
     .filter((r) => methods.some((m) => m.startsWith(`${r}:`)))
-    .map((r) => [r, new Reranker(r)]),
+    .map((r) => [r, new Reranker(r, RERANK_MAX_LENGTH)]),
 );
 for (const r of Object.values(rerankers)) await r.load();
 const embedders = Object.fromEntries(
@@ -163,6 +170,30 @@ async function evaluate(q: Question): Promise<Row> {
     rankings['bm25+qe'] = complete(await bm25Ranking(q, position, false, expansion), corpus.length);
     row.latencyMs['bm25+qe'] = Date.now() - t;
     row.scanned['bm25+qe'] = 0;
+  }
+  if (omniExpander && methods.some((m) => m.endsWith('bm25+oqe'))) {
+    const expansion = await omniExpander.expand(q.question_id, q.question); // LLM time is reported separately
+    t = Date.now();
+    rankings['bm25+oqe'] = complete(await bm25Ranking(q, position, false, expansion), corpus.length);
+    row.latencyMs['bm25+oqe'] = Date.now() - t;
+    row.scanned['bm25+oqe'] = 0;
+  }
+  if (queryWriter && methods.some((m) => m.endsWith('mq'))) {
+    const queries = await queryWriter.queries(q.question_id, q.question);
+    t = Date.now();
+    // the question itself plus each query the model wrote, searched in parallel and merged by rank
+    const lists = await Promise.all([q.question, ...queries].map((text) => bm25Ranking({ ...q, question: text }, position, false)));
+    rankings.mq = rrf(lists.map((l) => complete(l, corpus.length)), corpus.length);
+    row.latencyMs.mq = Date.now() - t;
+    row.scanned.mq = 0;
+  }
+  if (queryWriter && methods.some((m) => m.endsWith('bm25+mqe'))) {
+    // the same model-written queries, used as expansion terms next to the question (weight 0.5)
+    const queries = await queryWriter.queries(q.question_id, q.question);
+    t = Date.now();
+    rankings['bm25+mqe'] = complete(await bm25Ranking(q, position, false, queries.join(', ') || undefined), corpus.length);
+    row.latencyMs['bm25+mqe'] = Date.now() - t;
+    row.scanned['bm25+mqe'] = 0;
   }
   if (methods.includes('rm3')) {
     t = Date.now();

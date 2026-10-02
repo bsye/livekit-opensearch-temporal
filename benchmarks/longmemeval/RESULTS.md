@@ -149,3 +149,60 @@ Findings:
 | minilm:bm25+qe | 50 | 0.690 | 0.893 | 0.649 | 0.749 | 0.467 | 121 + LLM |
 | minilm:bm25+qe | 20 | 0.680 | 0.874 | 0.647 | 0.735 | 0.467 | 66 + LLM |
 | minilm:bm25+qe | 10 | 0.671 | 0.871 | 0.644 | 0.731 | 0.567 | 45 + LLM |
+
+## Shorter re-ranker inputs (`--rerank-max-length`)
+
+MiniLM over BM25's top N, with passages truncated to fewer tokens.
+
+| depth | max tokens | top-1 | turn recall_any@5 | NDCG@10 | session recall_all@5 |
+|---|---|---|---|---|---|
+| 20 | 512 | 0.652 | 0.862 | 0.716 | 0.687 |
+| 20 | 256 | 0.652 | 0.862 | 0.716 | 0.687 |
+| 20 | 128 | 0.652 | 0.859 | 0.715 | 0.685 |
+| 10 | 256 | 0.654 | 0.847 | 0.693 | 0.656 |
+
+Truncating to 256 tokens costs nothing; halving the depth does. Timed alone on the voice library
+(20 questions × their BM25 top 20, interleaved), re-ranking 20 passages took 99 / 93 / 93 ms at
+512 / 256 / 128 tokens: the stored messages are short (median 41 words), so truncation rarely
+applies. Recall now uses depth 20 at 256 tokens, and runs while the turn detector is still waiting,
+so it's mostly off the critical path either way.
+
+## The model writes the search (Qwen3-Omni, the omni agent's model)
+
+Can the model that decides to search also write the search, and does that replace MiniLM? Turn level,
+419 questions; re-ranking is MiniLM over the top 20 at 256 tokens. Model calls are cached and not
+included in the latencies.
+
+| method | top-1 | turn recall_any@5 | NDCG@10 | session recall_all@5 | preference (30) |
+|---|---|---|---|---|---|
+| bm25 | 0.516 | 0.800 | 0.630 | 0.616 | 0.333 |
+| minilm:bm25 (live recall) | **0.652** | 0.862 | 0.716 | 0.687 | 0.433 |
+| bm25+oqe: separate model call writes 10-20 keywords, weight 0.5 | 0.561 | 0.847 | 0.681 | 0.680 | **0.700** |
+| mq: the model's 1-3 tool-call queries, each searched, merged by RRF | 0.432 | 0.797 | 0.591 | 0.582 | 0.567 |
+| bm25+mqe: the same tool-call queries as expansion terms, weight 0.5 | 0.551 | 0.835 | 0.667 | 0.652 | 0.567 |
+| minilm:bm25+oqe | 0.649 | **0.888** | **0.741** | **0.730** | 0.500 |
+| minilm:mq | 0.640 | 0.866 | 0.721 | 0.704 | 0.533 |
+| **minilm:bm25+mqe** | 0.649 | 0.874 | 0.732 | 0.714 | 0.467 |
+
+- Model-written terms don't replace the re-ranker: without MiniLM, top-1 drops from 0.65 to 0.43-0.56.
+- How the terms are used matters: merging separate short queries by RRF dilutes the ranking (worse than
+  plain BM25 at top-1); appending them to the question at weight 0.5 helps.
+- The queries the model writes in its recall call, used as expansion (minilm:bm25+mqe), get most of the
+  gain of a dedicated expansion call (0.874 vs 0.888 recall_any@5) with no extra model call.
+- Preference questions still do best without the re-ranker (0.70 for bm25+oqe).
+
+## Topic filters (`npm run topics`, voice library: 100 questions, live index)
+
+The model calls recall with 1-3 queries and a topic from the same taxonomy Laya used to label every
+stored exchange. Session-level hits.
+
+| method | evidence in top 5 | first | p50 |
+|---|---|---|---|
+| BM25 → MiniLM | 0.86 | 0.78 | 47 ms |
+| question + model queries (RRF) → MiniLM | 0.88 | 0.78 | 45 ms |
+| … only the model's topic (filter) | 0.61 | 0.53 | 47 ms |
+| … the model's topic boosted | 0.85 | 0.75 | 48 ms |
+
+The model always names a topic, and its topic and Laya's label for the evidence disagree often enough
+that a filter loses a quarter of the answers. A boost doesn't help either. Topics aren't worth using
+for retrieval with these labels.

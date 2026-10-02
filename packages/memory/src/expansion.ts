@@ -9,12 +9,15 @@ const EXAMPLE_TERMS =
   'restaurant, Rome, Italy, dinner, trattoria, pizzeria, pasta, food, ate, meal, trip, vacation, recommend, favorite, loved';
 
 /** The words the user most likely used back then, so BM25 can match a paraphrased question. */
-export async function expandQuery(question: string): Promise<string> {
-  const res = await fetch(`${env('LLM_BASE_URL')}/chat/completions`, {
+export async function expandQuery(
+  question: string,
+  llm: { baseUrl: string; model: string } = { baseUrl: env('LLM_BASE_URL'), model: env('LLM_MODEL') },
+): Promise<string> {
+  const res = await fetch(`${llm.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: env('LLM_MODEL'),
+      model: llm.model,
       reasoning_effort: 'none',
       temperature: 0,
       max_tokens: 120,

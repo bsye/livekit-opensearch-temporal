@@ -452,7 +452,7 @@ async function* questions(): AsyncGenerator<Question> {
 }
 
 function indexCorpus() {
-  return buildIndex(
+  return rebuildIndexIfStale(
     index,
     {
       qid: { type: 'keyword' },
@@ -466,7 +466,7 @@ function indexCorpus() {
 }
 
 function indexSparseCorpus() {
-  return buildIndex(
+  return rebuildIndexIfStale(
     `${index}-sparse`,
     { qid: { type: 'keyword' }, docId: { type: 'keyword' }, sparse: { type: 'rank_features' } },
     async (q, docs) => {
@@ -478,8 +478,7 @@ function indexSparseCorpus() {
   )
 }
 
-/** Rebuilt only when the marker file and the index's document count disagree. */
-async function buildIndex(
+async function rebuildIndexIfStale(
   name: string,
   properties: Record<string, unknown>,
   documents: (q: Question, docs: Doc[]) => Promise<string[]>,

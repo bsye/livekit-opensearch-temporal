@@ -30,7 +30,10 @@ wait_for "LiveKit" 60 curl -sf https://livekit.localhost
 wait_for "Temporal namespace" 120 temporal_ready
 echo "  LiveKit and Temporal ready"
 
-if [ "$AGENT" != omni ]; then
+if [ "$AGENT" = omni ]; then
+  # omni doesn't use the LLM: free its memory for Qwen3-Omni
+  "$LMS" unload "$LLM_MODEL" >/dev/null 2>&1 && echo "  unloaded $LLM_MODEL (not used by omni)" || true
+else
   step "LLM (LM Studio, $LLM_MODEL)"
   "$LMS" server start >/dev/null 2>&1 || true
   "$LMS" ps 2>/dev/null | grep -q "$LLM_MODEL" || "$LMS" load "$LLM_MODEL" --identifier "$LLM_MODEL" -y >/dev/null
@@ -43,6 +46,9 @@ for other in $AGENTS; do
   # one agent per room: any other kind would join it too
   [ "$other" = "$AGENT" ] || stop_process "$other agent" "$(agent_entry "$other")" >/dev/null
 done
+# the big models of the other agents would only push this one into swap
+[ "$AGENT" = s2s ] || stop_process voicechat 'services/voicechat/server.py' >/dev/null
+[ "$AGENT" = omni ] || stop_process omni 'services/omni/server.py' >/dev/null
 start laya 'services/laya/server.py' services/laya/run.sh
 case "$AGENT" in
   cascade) start mlx-audio 'mlx_audio.server' services/mlx-audio/run.sh ;;

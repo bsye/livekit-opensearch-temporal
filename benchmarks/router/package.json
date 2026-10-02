@@ -6,7 +6,8 @@
   "scripts": {
     "bench": "node --env-file=../../.env --import tsx src/run.ts",
     "typecheck": "tsc --noEmit",
-    "gate": "node --env-file=../../.env --import tsx src/gate.ts"
+    "gate": "node --env-file=../../.env --import tsx src/gate.ts",
+    "combined": "node --env-file=../../.env --import tsx src/combined.ts"
   },
   "dependencies": {
     "livekit-temporal": "*"

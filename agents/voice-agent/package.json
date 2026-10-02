@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node --env-file=../../.env --import tsx src/agent.ts dev",
     "start": "node --env-file=../../.env --import tsx src/agent.ts start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:s2s": "node --env-file=../../.env --import tsx src/s2s.ts dev",
+    "warm:s2s": "node --env-file=../../.env --import tsx src/warm_s2s.ts"
   },
   "dependencies": {
     "@livekit/agents": "^1.9.1",
@@ -15,7 +17,9 @@
     "@livekit/rtc-node": "^1.1.0",
     "@temporalio/client": "^1.24.0",
     "@temporalio/common": "^1.24.0",
+    "@types/ws": "^8.18.2",
     "livekit-temporal": "*",
+    "ws": "^8.22.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

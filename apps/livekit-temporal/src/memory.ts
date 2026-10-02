@@ -265,3 +265,31 @@ async function layaPost(path: string, body: unknown): Promise<Record<string, unk
   if (!res.ok) throw new Error(`laya ${path}: ${res.status} ${await res.text()}`);
   return (await res.json()) as Record<string, unknown>;
 }
+
+/**
+ * Recall for a speech-to-speech model, which reads tool results one token per 80 ms audio frame:
+ * instead of whole past messages (hundreds of words), the `sentences` the re-ranker scores most
+ * relevant across the top hits (and the best hit's re-ranker score), oldest first, with dates ("Mar 07: ..."), each cut at 200 characters.
+ */
+export async function recallBrief(q: RecallQuery, sentences = 3): Promise<{ text: string; top: number; hits: number }> {
+  const { hits } = await recall({ ...q, limit: q.limit ?? 5 });
+  const nothing = { text: 'Nothing found about that in past conversations.', top: -Infinity, hits: 0 };
+  if (!hits.length) return nothing;
+  const top = Math.max(...hits.map((h) => h.score));
+  const candidates = hits.flatMap(({ doc }) =>
+    doc.userText
+      .split(/(?<=[.!?])\s+|\n+/)
+      .filter((s) => s.trim().length > 12)
+      .map((s) => ({ s: s.trim().slice(0, 200), at: doc.endedAt })),
+  );
+  if (!candidates.length) return nothing;
+  const scores = await rerankScores(q.question, candidates.map((c) => c.s));
+  const text = candidates
+    .map((c, i) => ({ ...c, score: scores[i] }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, sentences)
+    .sort((a, b) => a.at - b.at)
+    .map((c) => `${new Date(c.at).toDateString().slice(4, 10)}: ${c.s}`)
+    .join(' | ') + ' (oldest first; the last one is the most recent)';
+  return { text, top, hits: hits.length };
+}

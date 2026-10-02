@@ -4,6 +4,8 @@
 #
 #   scripts/meet.sh [room] [identity]      defaults: meet-<HHMMSS>, $USER
 #   NO_OPEN=1 scripts/meet.sh              print the link instead of opening the browser
+#   AGENT=cascade scripts/meet.sh          STT -> LLM -> TTS cascade (Gemma) instead of the default
+#                                          speech-to-speech agent (NVIDIA VoiceChat, AGENT=s2s)
 #
 # Native processes run detached; logs and pids are in .run/. Stop with scripts/stop.sh.
 set -euo pipefail
@@ -11,6 +13,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 ROOM="${1:-meet-$(date +%H%M%S)}"
+AGENT="${AGENT:-s2s}"
+case "$AGENT" in
+  cascade) AGENT_SRC='src/agent.ts'; AGENT_SCRIPT=dev; OTHER_SRC='src/s2s.ts' ;;
+  s2s) AGENT_SRC='src/s2s.ts'; AGENT_SCRIPT=dev:s2s; OTHER_SRC='src/agent.ts' ;;
+  *) echo "AGENT must be cascade or s2s" >&2; exit 1 ;;
+esac
 IDENTITY="${2:-$USER}"
 RUN="$ROOT/.run"
 LMS="$HOME/.lmstudio/bin/lms"
@@ -58,7 +66,11 @@ namespace_ready() {
 wait_for "Temporal namespace" 120 namespace_ready
 echo "  LiveKit and Temporal ready"
 
-step "LLM (LM Studio, $LLM_MODEL)"
+if [ "$AGENT" = s2s ]; then
+  step "LLM (LM Studio, $LLM_MODEL): memory query expansion only, the agent speaks with VoiceChat"
+else
+  step "LLM (LM Studio, $LLM_MODEL)"
+fi
 "$LMS" server start >/dev/null 2>&1 || true
 if ! "$LMS" ps 2>/dev/null | grep -q "$LLM_MODEL"; then
   echo "  loading model..."
@@ -72,11 +84,21 @@ start mlx-audio 'mlx_audio.server' services/mlx-audio/run.sh
 start laya 'services/laya/server.py' services/laya/run.sh
 start worker 'src/worker.ts' npm run worker -w livekit-temporal
 start translator 'src/translator.ts' npm run translator -w livekit-temporal
-start agent 'src/agent.ts' npm run dev -w voice-agent
+# one agent per room: both kinds would join it
+pkill -f "$OTHER_SRC" && echo "  stopped the other agent ($OTHER_SRC)" || true
+if [ "$AGENT" = s2s ]; then
+  start voicechat 'services/voicechat/server.py' services/voicechat/run.sh
+fi
+start agent "$AGENT_SRC" npm run "$AGENT_SCRIPT" -w voice-agent
 
 # A process started earlier (by us or by hand) has no fresh log to check, so fall back to probes
 wait_for "mlx-audio (STT + TTS)" 180 curl -sf "$SPEECH_BASE_URL/models"
 wait_for "laya (action gate)" 120 curl -sf "$LAYA_BASE_URL/health"
+if [ "$AGENT" = s2s ]; then
+  wait_for "voicechat (speech-to-speech model)" 300 curl -sf "http://localhost:${VOICECHAT_URL##*:}/health"
+  echo "  prefilling the agent prompt (about a minute the first time each day)..."
+  npm run -s warm:s2s -w voice-agent
+fi
 wait_for "translator" 60 curl -sf "http://localhost:${TRANSLATOR_PORT:-3100}/healthz"
 if [ -f "$RUN/worker.pid" ] && kill -0 "$(cat "$RUN/worker.pid")" 2>/dev/null; then
   wait_for "Temporal worker" 60 grep -q "state: 'RUNNING'" "$RUN/worker.log"
@@ -96,6 +118,7 @@ token=$(lk token create --join --room "$ROOM" --identity "$IDENTITY" --valid-for
 url="https://meet.livekit.io/custom?liveKitUrl=wss://livekit.localhost&token=$token"
 temporal="http://localhost:8233/namespaces/default/workflows?query=RoomName%3D%22$ROOM%22"
 
+echo "  agent:     $AGENT"
 echo "  room:      $ROOM (as $IDENTITY)"
 echo "  meet:      $url"
 echo "  temporal:  $temporal"

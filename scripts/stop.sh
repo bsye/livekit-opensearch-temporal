@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop the native services started by scripts/meet.sh (or by hand).
-#   scripts/stop.sh          agent, translator, worker, mlx-audio, laya
+#   scripts/stop.sh          agents, translator, worker, mlx-audio, laya, voicechat
 #   scripts/stop.sh --all    also docker compose stop and unload the LM Studio model
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,6 +10,8 @@ stop() { # NAME PATTERN
   if pkill -f "$2"; then echo "stopped $1"; else echo "$1 not running"; fi
 }
 stop agent 'src/agent.ts'
+stop s2s-agent 'src/s2s.ts'
+stop voicechat 'services/voicechat/server.py|services/voicechat/run.sh'
 stop translator 'src/translator.ts'
 stop worker 'src/worker.ts'
 stop mlx-audio 'mlx_audio.server|services/mlx-audio/run.sh'

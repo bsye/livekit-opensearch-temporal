@@ -1,0 +1,18 @@
+{
+  "name": "voicechat-bench",
+  "private": true,
+  "type": "module",
+  "description": "NVIDIA NemotronLabs VoiceChat (speech-to-speech) with tools, memory and Laya, vs the cascade",
+  "scripts": {
+    "bench": "node --env-file=../../.env --import tsx src/run.ts",
+    "smoke": "node --env-file=../../.env --import tsx src/smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "livekit-temporal": "*",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}

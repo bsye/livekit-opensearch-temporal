@@ -1,21 +1,21 @@
-import { llm } from '@livekit/agents';
-import { NOTHING_FOUND, recall } from '@voice/memory';
-import type { ActionDecision, RoomRef } from '@voice/temporal';
-import { z } from 'zod';
-import type { Actions } from './actions.js';
-import { approvalTool } from './approval.js';
-import type { RecallPrefetch } from './prefetch.js';
+import { llm } from '@livekit/agents'
+import { NOTHING_FOUND, recall } from '@voice/memory'
+import type { ActionDecision, RoomRef } from '@voice/temporal'
+import { z } from 'zod'
+import type { Actions } from './actions.js'
+import { approvalTool } from './approval.js'
+import type { RecallPrefetch } from './prefetch.js'
 
 export interface ToolDeps {
-  room: () => RoomRef;
-  agent: () => string;
-  reportAction: (decision: ActionDecision) => void;
+  room: () => RoomRef
+  agent: () => string
+  reportAction: (decision: ActionDecision) => void
   /** Marks the next reply as answered from memory. */
-  onRecall: () => void;
+  onRecall: () => void
   /** Filled with each call's duration, by tool call id. */
-  toolTimings?: Map<string, number>;
+  toolTimings?: Map<string, number>
   /** A search already started on the user's words (see prefetch.ts). */
-  prefetch?: RecallPrefetch;
+  prefetch?: RecallPrefetch
 }
 
 /**
@@ -71,54 +71,59 @@ export function createTools(actions: Actions, deps: ToolDeps) {
         to: z.string().optional().describe('End of the time range, ISO date/time, only if the user gave one'),
       }),
       execute: async ({ question, from, to }) => {
-        deps.onRecall();
-        const started = Date.now();
+        deps.onRecall()
+        const started = Date.now()
         // the prefetched search used the user's own words; a time range, or nothing found there
         // (a follow-up the model rephrased), needs a search on the model's question
-        const early = !from && !to ? deps.prefetch?.current() : undefined;
-        let result = early ? await early.result.catch(() => undefined) : undefined;
-        const prefetched = !!result?.hits.length;
+        const early = !from && !to ? deps.prefetch?.current() : undefined
+        let result = early ? await early.result.catch(() => undefined) : undefined
+        const prefetched = !!result?.hits.length
         if (!prefetched) {
           result = await recall({
             question,
             from: from ? Date.parse(from) || undefined : undefined,
             to: to ? Date.parse(to) || undefined : undefined,
             excludeRoomSid: deps.room().sid,
-          });
+          })
         }
-        const { hits, route, timings } = result!;
-        console.log(`recall [${route}, ${prefetched ? `prefetched "${early!.question}"` : 'searched'}] "${question}": ${hits.length} hits, ${Date.now() - started}ms on the critical path ${JSON.stringify(timings)}`);
-        if (hits.length === 0) return NOTHING_FOUND;
+        const { hits, route, timings } = result!
+        console.log(
+          `recall [${route}, ${prefetched ? `prefetched "${early!.question}"` : 'searched'}] "${question}": ${hits.length} hits, ${Date.now() - started}ms on the critical path ${JSON.stringify(timings)}`,
+        )
+        if (hits.length === 0) return NOTHING_FOUND
         const lines = hits
           .toSorted((a, b) => a.doc.endedAt - b.doc.endedAt)
-          .map(({ doc }) => `[${formatWhen(doc.endedAt)}] User: ${doc.userText} | Assistant: ${doc.agentText.slice(0, 300)}`);
+          .map(
+            ({ doc }) =>
+              `[${formatWhen(doc.endedAt)}] User: ${doc.userText} | Assistant: ${doc.agentText.slice(0, 300)}`,
+          )
         return (
           `Relevant past messages, oldest first:\n${lines.join('\n')}\n` +
           'Answer from these, saying when it was. If the user said different things at different times ' +
           '(a number, a plan, a preference changed), the most recent statement is the current one. ' +
           'If none of them answers the question, say you do not remember.'
-        );
+        )
       },
     }),
-  };
-  if (deps.toolTimings) for (const tool of Object.values(tools)) timed(tool, deps.toolTimings);
-  return tools;
+  }
+  if (deps.toolTimings) for (const tool of Object.values(tools)) timed(tool, deps.toolTimings)
+  return tools
 }
 
 /** Records how long each call took (approval included: it runs inside execute). */
 function timed(tool: { execute: (...args: never[]) => Promise<unknown> }, timings: Map<string, number>) {
-  const execute = tool.execute.bind(tool) as (args: unknown, opts: { toolCallId: string }) => Promise<unknown>;
+  const execute = tool.execute.bind(tool) as (args: unknown, opts: { toolCallId: string }) => Promise<unknown>
   tool.execute = (async (args: unknown, opts: { toolCallId: string }) => {
-    const started = Date.now();
+    const started = Date.now()
     try {
-      return await execute(args, opts);
+      return await execute(args, opts)
     } finally {
-      timings.set(opts.toolCallId, Date.now() - started);
+      timings.set(opts.toolCallId, Date.now() - started)
     }
-  }) as never;
+  }) as never
 }
 
 function formatWhen(ms: number): string {
-  const d = new Date(ms);
-  return `${d.toDateString().slice(0, 10)}, ${d.toTimeString().slice(0, 5)}`;
+  const d = new Date(ms)
+  return `${d.toDateString().slice(0, 10)}, ${d.toTimeString().slice(0, 5)}`
 }

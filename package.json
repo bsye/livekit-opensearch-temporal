@@ -14,9 +14,12 @@
     "setup": "scripts/setup.sh",
     "start": "scripts/start.sh",
     "stop": "scripts/stop.sh",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
     "@inquirer/prompts": "^8.7.2",
     "@types/node": "^20.19.43",
     "tsx": "^4.23.15",

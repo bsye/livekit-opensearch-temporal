@@ -7,7 +7,9 @@
     "./workflows": "./src/workflows/index.ts",
     "./activities": "./src/activities.ts"
   },
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@temporalio/client": "^1.24.0",
     "@temporalio/common": "^1.24.0",

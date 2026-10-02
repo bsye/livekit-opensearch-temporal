@@ -1,11 +1,11 @@
-import { libraryQuestions } from '@bench/longmemeval/library';
+import { libraryQuestions } from '@bench/longmemeval/library'
 
-export type Label = 'past' | 'action' | 'chat';
+export type Label = 'past' | 'action' | 'chat'
 
 export interface Turn {
-  text: string;
-  label: Label;
-  group: string;
+  text: string
+  label: Label
+  group: string
 }
 
 /** 220 turns: the 100 library questions + 20 conversational ones need memory; 50 actions; 50 chat. */
@@ -15,13 +15,13 @@ export function routerTurns(): Turn[] {
     ...PAST_EXTRA.map((text) => ({ text, label: 'past' as const, group: 'past:conversational' })),
     ...ACTION.map((text) => ({ text, label: 'action' as const, group: 'action' })),
     ...CHAT.map((text) => ({ text, label: 'chat' as const, group: 'chat' })),
-  ];
+  ]
 }
 
 // Some turns are written the way speech-to-text returns them: lowercase, no punctuation.
 export const PAST_EXTRA = [
   'What did we talk about yesterday?',
-  'Did I tell you about my sister\'s wedding?',
+  "Did I tell you about my sister's wedding?",
   'What was the name of that book I mentioned last week?',
   'remind me what i said about my new job',
   'what was the restaurant i told you about in lisbon',
@@ -40,7 +40,7 @@ export const PAST_EXTRA = [
   'What was the movie we were talking about the other day?',
   'what car did i say i was thinking of buying',
   'What did I say I wanted to cook for the party?',
-];
+]
 
 export const ACTION = [
   'Remind me to call my mom at six tonight.',
@@ -60,7 +60,7 @@ export const ACTION = [
   'Please send the report to my manager.',
   'set a reminder to water the plants on sunday',
   'Remind me in an hour to check the oven.',
-  'Can you create a calendar event for my sister\'s birthday on May 3rd?',
+  "Can you create a calendar event for my sister's birthday on May 3rd?",
   'Send a message to the team: standup is cancelled today.',
   'Change the reminder to 7 instead of 6.',
   'Move my dentist reminder to Friday.',
@@ -86,14 +86,14 @@ export const ACTION = [
   'Snooze that reminder for 15 minutes.',
   'Make a to-do: finish the slides.',
   'Tell Anna I am on my way.',
-  'Set a reminder for my mom\'s birthday next week.',
+  "Set a reminder for my mom's birthday next week.",
   'Archive all the newsletters.',
   'Start a 25 minute focus timer.',
   'Send the meeting notes to everyone who attended.',
   'Remind me to stretch every two hours.',
   'Put the trip to Rome in my calendar from June 2 to June 6.',
   'Add "call the bank" to my list.',
-];
+]
 
 export const CHAT = [
   'Hey, how are you?',
@@ -103,16 +103,16 @@ export const CHAT = [
   'How does photosynthesis work?',
   'whats the weather like in general in march in rome',
   'Can you explain how LiveKit ingress works?',
-  'What\'s a good recipe for vegetarian lasagna?',
+  "What's a good recipe for vegetarian lasagna?",
   'Why is the sky blue?',
   'What do you think about electric cars?',
   'tell me more',
   'Okay, go on.',
   'Can you recommend a good sci-fi book?',
   'How many ounces are in a cup?',
-  'What\'s the difference between a virus and a bacteria?',
+  "What's the difference between a virus and a bacteria?",
   'good morning',
-  'That\'s funny.',
+  "That's funny.",
   'Explain quantum computing simply.',
   'What should I know before adopting a cat?',
   'Who wrote Pride and Prejudice?',
@@ -129,10 +129,10 @@ export const CHAT = [
   'bye',
   'Summarize the plot of Inception.',
   'What are the main differences between Python and TypeScript?',
-  'I\'m feeling a bit tired today.',
+  "I'm feeling a bit tired today.",
   'Can you suggest a name for a golden retriever puppy?',
   'How do vaccines work?',
-  'What\'s a good stretching routine for the morning?',
+  "What's a good stretching routine for the morning?",
   'How far is the Moon from the Earth?',
   'What is a mortgage pre-approval?',
   'Which is better for beginners, guitar or piano?',
@@ -145,5 +145,5 @@ export const CHAT = [
   'How do I fix a leaky faucet?',
   'Recommend some podcasts about history.',
   'Is coffee bad for you?',
-  'What\'s the best way to learn Spanish?',
-];
+  "What's the best way to learn Spanish?",
+]

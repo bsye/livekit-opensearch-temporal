@@ -1,32 +1,32 @@
-import { defineSearchAttributeKey, SearchAttributeType } from '@temporalio/common';
-import { defineQuery } from '@temporalio/workflow';
-import type { ActionDecision, LiveKitEvent, RoomSignal, RoomState, ToolStep, Turn, TurnTiming } from './types.js';
+import { defineSearchAttributeKey, SearchAttributeType } from '@temporalio/common'
+import { defineQuery } from '@temporalio/workflow'
+import type { ActionDecision, LiveKitEvent, RoomSignal, RoomState, ToolStep, Turn, TurnTiming } from './types.js'
 
-export const TASK_QUEUE = 'livekit-rooms';
+export const TASK_QUEUE = 'livekit-rooms'
 
 // Created by infra/temporal/setup.sh
-export const RoomName = defineSearchAttributeKey('RoomName', SearchAttributeType.KEYWORD);
-export const ParticipantIdentities = defineSearchAttributeKey('ParticipantIdentities', SearchAttributeType.KEYWORD_LIST);
+export const RoomName = defineSearchAttributeKey('RoomName', SearchAttributeType.KEYWORD)
+export const ParticipantIdentities = defineSearchAttributeKey('ParticipantIdentities', SearchAttributeType.KEYWORD_LIST)
 
-export const roomState = defineQuery<RoomState>('roomState');
+export const roomState = defineQuery<RoomState>('roomState')
 
 export function isRoomSignal(payload: unknown): payload is RoomSignal {
-  const type = (payload as RoomSignal | undefined)?.type;
-  return type === 'livekitEvent' || type === 'turn';
+  const type = (payload as RoomSignal | undefined)?.type
+  return type === 'livekitEvent' || type === 'turn'
 }
 
 export function actorIcon(kind: string | undefined): string {
   switch (kind) {
     case 'AGENT':
-      return '🤖';
+      return '🤖'
     case 'INGRESS':
-      return '📥';
+      return '📥'
     case 'EGRESS':
-      return '📤';
+      return '📤'
     case 'SIP':
-      return '☎️';
+      return '☎️'
     default:
-      return '👤';
+      return '👤'
   }
 }
 
@@ -37,36 +37,44 @@ export function actorIcon(kind: string | undefined): string {
 export function eventLabel(e: LiveKitEvent): string {
   if (e.participant) {
     // protobuf JSON omits default enum values, and AUDIO is the default track type
-    const track = e.track ? ` (${e.track.type ?? 'AUDIO'})` : '';
-    return `${actorIcon(e.participant.kind)} ${e.participant.identity} · ${e.event}${track}`;
+    const track = e.track ? ` (${e.track.type ?? 'AUDIO'})` : ''
+    return `${actorIcon(e.participant.kind)} ${e.participant.identity} · ${e.event}${track}`
   }
-  if (e.egressInfo) return `📤 egress · ${e.event}`;
-  if (e.ingressInfo) return `📥 ingress · ${e.event}`;
-  return `🏠 ${e.event}`;
+  if (e.egressInfo) return `📤 egress · ${e.event}`
+  if (e.ingressInfo) return `📥 ingress · ${e.event}`
+  return `🏠 ${e.event}`
 }
 
 export function signalLabel(s: RoomSignal): string {
   // a turn signal is followed by its labelled child row, so it stays short
-  return s.type === 'livekitEvent' ? eventLabel(s.data) : '💬 turn received';
+  return s.type === 'livekitEvent' ? eventLabel(s.data) : '💬 turn received'
 }
 
 /** One row per turn: `💬 3 · 👤 “How was I feeling…” → 🤖 “You mentioned…” · 🧠 · 🛠 set_reminder · ⏱ 1.3s`. */
 export function turnLabel(t: Turn): string {
-  const user = t.userText ? `👤 “${truncate(t.userText, 40)}” → ` : '';
+  const user = t.userText ? `👤 “${truncate(t.userText, 40)}” → ` : ''
   const marks = [
     t.memory?.text ? '🧠' : '',
     ...t.tools.map((s) => `🛠 ${s.name}`),
     t.actions.some((a) => a.decision === 'flagged') ? '⚠️' : '',
     t.interrupted ? '✂️ interrupted' : '',
     t.timing.voiceToVoiceMs !== undefined ? `⏱ ${seconds(t.timing.voiceToVoiceMs)}` : '',
-  ].filter(Boolean);
-  return truncate(`💬 ${t.index ?? ''} · ${user}🤖 “${truncate(t.reply, 40)}”${marks.length ? ` · ${marks.join(' · ')}` : ''}`, 190);
+  ].filter(Boolean)
+  return truncate(
+    `💬 ${t.index ?? ''} · ${user}🤖 “${truncate(t.reply, 40)}”${marks.length ? ` · ${marks.join(' · ')}` : ''}`,
+    190,
+  )
 }
 
 export function toolLabel(s: ToolStep): string {
-  const args = Object.values(s.args).map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
-  const took = s.durationMs !== undefined ? ` · ${seconds(s.durationMs)}` : '';
-  return truncate(`🛠 ${s.name}(${truncate(args, 50)})${took}${s.output ? ` → ${s.isError ? '❌ ' : ''}${s.output}` : ''}`, 190);
+  const args = Object.values(s.args)
+    .map((v) => (typeof v === 'string' ? v : JSON.stringify(v)))
+    .join(', ')
+  const took = s.durationMs !== undefined ? ` · ${seconds(s.durationMs)}` : ''
+  return truncate(
+    `🛠 ${s.name}(${truncate(args, 50)})${took}${s.output ? ` → ${s.isError ? '❌ ' : ''}${s.output}` : ''}`,
+    190,
+  )
 }
 
 /** The user's side of a turn: `🎙 you spoke 2.1s · recognised in 0.4s · end of turn 0.7s`. */
@@ -75,8 +83,8 @@ export function userTimingLabel(t: TurnTiming): string | undefined {
     t.speechMs !== undefined ? `you spoke ${seconds(t.speechMs)}` : '',
     t.transcriptionMs !== undefined ? `recognised in ${seconds(t.transcriptionMs)}` : '',
     t.endOfTurnMs !== undefined ? `end of turn ${seconds(t.endOfTurnMs)}` : '',
-  ].filter(Boolean);
-  return parts.length ? `🎙 ${parts.join(' · ')}` : undefined;
+  ].filter(Boolean)
+  return parts.length ? `🎙 ${parts.join(' · ')}` : undefined
 }
 
 /** The agent's side: `🤖 first token 0.52s · first audio 0.18s · ⏱ voice-to-voice 1.8s`. */
@@ -85,21 +93,21 @@ export function agentTimingLabel(t: TurnTiming): string | undefined {
     t.firstTokenMs !== undefined ? `first token ${seconds(t.firstTokenMs)}` : '',
     t.firstAudioMs !== undefined ? `first audio ${seconds(t.firstAudioMs)}` : '',
     t.voiceToVoiceMs !== undefined ? `⏱ voice-to-voice ${seconds(t.voiceToVoiceMs)}` : '',
-  ].filter(Boolean);
-  return parts.length ? `🤖 ${parts.join(' · ')}` : undefined;
+  ].filter(Boolean)
+  return parts.length ? `🤖 ${parts.join(' · ')}` : undefined
 }
 
 export function seconds(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
 export function actionLabel(a: ActionDecision): string {
-  const why = a.reasons.length ? ` (${a.reasons.join('; ')})` : '';
-  if (a.decision === 'audited') return `🔎 Laya audit · ${a.tool} ok ${a.intent?.toFixed(2) ?? ''}`;
-  if (a.decision === 'flagged') return `⚠️ Laya audit · ${a.tool} flagged${why}`;
-  return `🛡 approval · ${a.tool} → ${a.decision}${why}`;
+  const why = a.reasons.length ? ` (${a.reasons.join('; ')})` : ''
+  if (a.decision === 'audited') return `🔎 Laya audit · ${a.tool} ok ${a.intent?.toFixed(2) ?? ''}`
+  if (a.decision === 'flagged') return `⚠️ Laya audit · ${a.tool} flagged${why}`
+  return `🛡 approval · ${a.tool} → ${a.decision}${why}`
 }
 
 export function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }

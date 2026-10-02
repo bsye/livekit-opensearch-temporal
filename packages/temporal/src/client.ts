@@ -1,18 +1,18 @@
-import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import { WorkflowIdReusePolicy } from '@temporalio/common';
-import { env } from '@voice/config';
-import { RoomName, signalLabel, TASK_QUEUE } from './definitions.js';
-import type { EmailInput, ReminderInput, RoomRef, RoomSignal } from './types.js';
-import { reminder, roomSession, sendEmail } from './workflows/index.js';
+import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client'
+import { WorkflowIdReusePolicy } from '@temporalio/common'
+import { env } from '@voice/config'
+import { RoomName, signalLabel, TASK_QUEUE } from './definitions.js'
+import type { EmailInput, ReminderInput, RoomRef, RoomSignal } from './types.js'
+import { reminder, roomSession, sendEmail } from './workflows/index.js'
 
 export async function connectTemporal(): Promise<Client> {
   return new Client({
     connection: await Connection.connect({ address: env('TEMPORAL_ADDRESS') }),
     namespace: env('TEMPORAL_NAMESPACE'),
-  });
+  })
 }
 
-const roomAttributes = (roomName?: string) => (roomName ? [{ key: RoomName, value: roomName }] : []);
+const roomAttributes = (roomName?: string) => (roomName ? [{ key: RoomName, value: roomName }] : [])
 
 /**
  * Signal the room's workflow, starting it if needed: webhooks and agents race, whoever arrives first
@@ -28,11 +28,11 @@ export async function signalRoom(client: Client, room: RoomRef, signal: RoomSign
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
       typedSearchAttributes: roomAttributes(room.name),
       staticSummary: `🏠 ${room.name ?? room.sid}`,
-    });
-    return true;
+    })
+    return true
   } catch (err) {
-    if (err instanceof WorkflowExecutionAlreadyStartedError) return false;
-    throw err;
+    if (err instanceof WorkflowExecutionAlreadyStartedError) return false
+    throw err
   }
 }
 
@@ -43,12 +43,12 @@ export async function startReminder(client: Client, input: ReminderInput, roomNa
     args: [input],
     staticSummary: `⏰ ${input.text} @ ${input.when}`,
     typedSearchAttributes: roomAttributes(roomName),
-  });
-  return handle.workflowId;
+  })
+  return handle.workflowId
 }
 
 export async function cancelReminder(client: Client, workflowId: string): Promise<void> {
-  await client.workflow.getHandle(workflowId).cancel();
+  await client.workflow.getHandle(workflowId).cancel()
 }
 
 export async function recordEmail(client: Client, input: EmailInput, roomName?: string): Promise<string> {
@@ -58,7 +58,7 @@ export async function recordEmail(client: Client, input: EmailInput, roomName?: 
     args: [input],
     staticSummary: `✉️ to ${input.to}: ${input.subject}`,
     typedSearchAttributes: roomAttributes(roomName),
-  });
-  await handle.result();
-  return handle.workflowId;
+  })
+  await handle.result()
+  return handle.workflowId
 }

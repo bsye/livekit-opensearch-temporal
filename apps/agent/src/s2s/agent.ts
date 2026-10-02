@@ -16,7 +16,7 @@ import { route } from '@voice/laya';
 import { recallBrief, warmReranker } from '@voice/memory';
 import { connectTemporal } from '@voice/temporal';
 import { FRAME_SAMPLES, parseToolCalls, stripToolResponses, VoiceChatSession, type ToolCall } from '@voice/voicechat';
-import { roomReporter } from '../reporting.js';
+import { RoomReporter } from '../reporting.js';
 import { createActions, type EmailArgs, type ReminderArgs } from '../tools/actions.js';
 import { ActionAuditor } from '../tools/audit.js';
 import { prompt } from './prompt.js';
@@ -52,7 +52,8 @@ export default defineAgent({
     const room = { sid: await ctx.room.getSid(), name: ctx.room.name ?? '' };
     const agentIdentity = ctx.room.localParticipant?.identity ?? 'agent';
     let user = 'user';
-    const { report, reportAction } = roomReporter(temporal, () => room);
+    const reporter = new RoomReporter(temporal, () => room, () => agentIdentity);
+    const reportAction = reporter.action;
 
     const started = Date.now();
     const model = await VoiceChatSession.open(env('VOICECHAT_URL'), prompt());
@@ -117,6 +118,7 @@ export default defineAgent({
             : call.name === '(unparsable)' ? 'That tool call was not valid JSON. Answer the user without it.'
             : await runTool(call).catch((err) => `The tool failed: ${err}`);
           await model.toolOutput(out);
+          reporter.tool({ name: call.name, args: call.arguments, output: out, at: t, durationMs: Date.now() - t });
           console.log(`tool ${call.name} → "${out.slice(0, 160)}" (${Date.now() - t}ms incl. injecting)`);
         });
       }
@@ -174,6 +176,7 @@ export default defineAgent({
       const refersBack = REFERS_BACK.test(heard);
       const memoryTurn = laya === 'past' || refersBack || (firstPerson && found.top >= STRONG_MATCH);
       console.log(`route "${heard}": laya ${laya}, best match ${found.top.toFixed(1)} → ${memoryTurn ? 'memory' : 'no memory'} (${Date.now() - t}ms)`);
+      reporter.memory({ route: laya, text: memoryTurn ? found.text : undefined, ms: Date.now() - t });
       // an empty search is only forced in for first-person turns: "tell me a joke" mustn't become "I don't remember"
       const worthForcing = memoryTurn && (found.hits > 0 || firstPerson || refersBack);
       // the model called a tool itself meanwhile: its answer stands
@@ -213,22 +216,17 @@ export default defineAgent({
         void routeTurn();
         const durationMs = lastText.at - lastUserAt;
         console.log(`voice-to-voice latency: ${durationMs}ms`);
-        report({ type: 'agentMetrics', data: { type: 'turn_latency', at: lastText.at, durationMs, participant: agentIdentity } });
+        reporter.metric({ type: 'voice_to_voice', ms: durationMs });
       }
       if (lastText) lastAgentAt = lastText.at;
       if (userText && now - lastUserAt > TURN_QUIET_MS && (lastAgentAt > lastUserAt || now - lastUserAt > 3 * TURN_QUIET_MS)) {
-        report({ type: 'transcript', data: { role: 'user', text: userText, participant: user, at: lastUserAt } });
+        reporter.userSaid(userText, user, lastUserAt);
         userFrom = model.userText.length;
         userText = '';
       }
       if (reply() && now - lastAgentAt > TURN_QUIET_MS && now - lastUserAt > TURN_QUIET_MS) {
         const text = reply().replace(/<[^>]+>/g, '').trim();
-        if (text) {
-          report({
-            type: 'transcript',
-            data: { role: 'assistant', text, participant: agentIdentity, at: lastAgentAt, fromMemory: answeringFromMemory || undefined },
-          });
-        }
+        if (text) reporter.agentSaid(text, lastAgentAt, { fromMemory: answeringFromMemory });
         agentFrom = model.assistantText.length;
         answeringFromMemory = false;
       }

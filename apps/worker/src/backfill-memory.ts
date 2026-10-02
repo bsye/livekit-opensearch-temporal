@@ -1,9 +1,9 @@
 /**
- * Index the transcripts of past room workflows into conversation memory. Idempotent.
+ * Index the turns of past room workflows into conversation memory. Idempotent.
  *   npm run backfill-memory -w @voice/worker [-- --skip-users alice,tester]
  */
 import { indexExchange } from '@voice/memory';
-import { connectTemporal, type RoomState, type TranscriptEntry } from '@voice/temporal';
+import { connectTemporal, type RoomState } from '@voice/temporal';
 
 const skipArg = process.argv.indexOf('--skip-users');
 const skipUsers = new Set(skipArg > 0 ? process.argv[skipArg + 1].split(',') : []);
@@ -22,33 +22,23 @@ for await (const wf of client.workflow.list({ query: 'WorkflowType="roomSession"
   const users = Object.values(state.participants)
     .filter((p) => p.kind !== 'AGENT')
     .map((p) => p.identity);
-  if (users.some((u) => skipUsers.has(u)) || !state.transcript?.length) continue;
+  const turns = (state.turns ?? []).filter((t) => t.userText && t.reply);
+  if (users.some((u) => skipUsers.has(u)) || !turns.length) continue;
   rooms++;
-  for (const exchange of exchanges(state.transcript)) {
-    await indexExchange({ roomSid: state.sid ?? wf.workflowId, roomName: state.name, ...exchange });
+  for (const t of turns) {
+    await indexExchange({
+      roomSid: state.sid ?? wf.workflowId,
+      roomName: state.name,
+      user: t.user,
+      agent: t.agent,
+      userText: t.userText,
+      agentText: t.reply,
+      startedAt: t.startedAt,
+      endedAt: t.endedAt,
+      fromMemory: t.fromMemory,
+    });
     indexed++;
   }
-  console.log(`${state.name ?? wf.workflowId}: ${state.transcript.length} transcript lines`);
+  console.log(`${state.name ?? wf.workflowId}: ${turns.length} turns`);
 }
 console.log(`indexed ${indexed} exchanges from ${rooms} rooms`);
-
-function* exchanges(transcript: TranscriptEntry[]) {
-  let userTurns: TranscriptEntry[] = [];
-  for (const entry of transcript) {
-    if (entry.role !== 'assistant') {
-      userTurns.push(entry);
-      continue;
-    }
-    if (userTurns.length === 0) continue;
-    yield {
-      user: userTurns[0].participant,
-      agent: entry.participant,
-      userText: userTurns.map((t) => t.text).join(' '),
-      agentText: entry.text,
-      startedAt: userTurns[0].at,
-      endedAt: entry.at,
-      fromMemory: entry.fromMemory,
-    };
-    userTurns = [];
-  }
-}

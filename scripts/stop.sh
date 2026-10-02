@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
-# Stop the native services started by scripts/meet.sh (or by hand).
-#   scripts/stop.sh          agents, translator, worker, mlx-audio, laya, voicechat
-#   scripts/stop.sh --all    also docker compose stop and unload the LM Studio model
+# Stops the native services; with --all also the containers and the LM Studio model.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+. scripts/lib.sh
 
-stop() { # NAME PATTERN
-  if pkill -f "$2"; then echo "stopped $1"; else echo "$1 not running"; fi
-}
-stop agent 'src/agent.ts'
-stop s2s-agent 'src/s2s.ts'
-stop voicechat 'services/voicechat/server.py|services/voicechat/run.sh'
-stop translator 'src/translator.ts'
-stop worker 'src/worker.ts'
-stop mlx-audio 'mlx_audio.server|services/mlx-audio/run.sh'
-stop laya 'services/laya/server.py'
-rm -f .run/*.pid
+for agent in $AGENTS; do stop_process "$agent agent" "$(agent_entry "$agent")"; done
+stop_process translator 'src/translator.ts'
+stop_process worker 'src/worker.ts'
+stop_process laya 'services/laya/server.py'
+stop_process mlx-audio 'mlx_audio.server|services/mlx-audio/run.sh'
+stop_process voicechat 'services/voicechat/server.py'
+stop_process omni 'services/omni/server.py'
+rm -f "$RUN"/*.pid
 
 if [ "${1:-}" = --all ]; then
-  set -a; . ./.env; set +a
+  load_env
   docker compose stop
-  "$HOME/.lmstudio/bin/lms" unload "$LLM_MODEL" 2>/dev/null && echo "unloaded $LLM_MODEL"
+  "$LMS" unload "$LLM_MODEL" 2>/dev/null && echo "unloaded $LLM_MODEL"
 fi
+exit 0

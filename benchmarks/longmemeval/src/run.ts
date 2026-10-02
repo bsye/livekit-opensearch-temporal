@@ -1,30 +1,17 @@
-// LongMemEval retrieval benchmark for conversation memory without embeddings.
-//
-//   npm run bench -w longmemeval-bench -- [--dataset longmemeval_s_cleaned|longmemeval_m_cleaned]
-//        [--granularity turn|session] [--methods bm25,bm25-fuzzy,bm25+laya,laya] [--limit N] [--fresh]
-//
-// Retrievers (same corpus, labels and metrics as the official run_retrieval.py):
-//   contriever  facebook/contriever (dense embeddings, the paper's dense baseline; benchmark only)
-//   bm25-paper  the paper's own BM25 (rank_bm25 BM25Okapi on space-split text), in-process
-//   bm25        OpenSearch BM25 (english analyzer: lowercasing, stemming, stopwords)
-//   bm25+qe     BM25 over the question plus LLM query-expansion terms (weight 0.5)
-//   bm25+pref   BM25, plus Laya preference tags when Laya judges the question to ask for preferences
-//   bm25+qe+pref both of the above
-//   rm3         BM25 + RM3 pseudo-relevance feedback (Anserini defaults), no model / no LLM
-//   dense-<e>   modern embeddings via LM Studio (e = qwen3 | nomic), cosine similarity
-//   rrf-bm25+<e>, rrf-bm25qe+<e>  reciprocal rank fusion (k=60) of BM25 (or BM25+qe) with dense-<e>
-//   <r>:<base>  cross-encoder re-ranking (r = bge | minilm) of <base>'s top 50, e.g. bge:bm25+qe
-//   sparse      learned sparse retrieval (OpenSearch doc-only neural sparse model, rank_features)
-//   bm25-fuzzy  BM25 with fuzzy term matching (tolerates misspellings / speech-to-text errors)
-//   laya        parallel Laya scan: every document of the question's history scored on the GPU
-//   bm25+laya   BM25 top 50 re-ordered by Laya, then the rest of the BM25 ranking
-//
-// The dataset is streamed one question at a time (LongMemEval_M is 2.7 GB), once to index the
-// corpus into OpenSearch and once to evaluate. Resumable: each question's result is appended to
-// results/<dataset>-<granularity>.progress.jsonl; a rerun skips questions already there.
+/**
+ * LongMemEval retrieval benchmark: same corpus, labels and metrics as the official run_retrieval.py.
+ * Retrievers are listed in ../README.md. The dataset is streamed (LongMemEval_M is 2.7 GB) and runs
+ * are resumable: each question's result is appended to a progress file and skipped on rerun.
+ *
+ *   npm run bench -w @bench/longmemeval -- --dataset longmemeval_m_cleaned --methods bm25,minilm:bm25
+ *        [--granularity turn|session] [--rerank-depth N] [--limit N] [--tag name] [--fresh]
+ */
 import { createReadStream, appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import StreamArray from 'stream-json/streamers/StreamArray.js';
+import { dataPath, env } from '@voice/config';
+import { scan } from '@voice/laya';
+import { Reranker, RERANKERS, type RerankerName } from '@voice/memory';
 import { bm25OkapiRanking } from './bm25okapi.js';
 import { contrieverRanking, loadContriever } from './contriever.js';
 import { QueryExpander } from './expansion.js';
@@ -32,7 +19,6 @@ import { encodeDocs, loadSparse, queryWeights } from './sparse.js';
 import { PreferenceTags } from './preference.js';
 import { Embedder, EMBEDDERS, rrf } from './embeddings.js';
 import { rm3Query } from './rm3.js';
-import { Reranker, RERANKERS, type RerankerName } from './rerank.js';
 import {
   buildCorpus,
   evaluateRetrieval,
@@ -45,9 +31,8 @@ import {
   type Scores,
 } from './official.js';
 
-const OPENSEARCH = process.env.OPENSEARCH_URL ?? 'http://localhost:9201';
-const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
-const DATA = new URL('../../../data/benchmarks/longmemeval/', import.meta.url);
+const OPENSEARCH = env('OPENSEARCH_URL');
+const DATA = dataPath('benchmarks', 'longmemeval');
 const RERANK_DEPTH = Number(process.argv.includes('--rerank-depth') ? process.argv[process.argv.indexOf('--rerank-depth') + 1] : 50);
 const ALL_METHODS = [
   'contriever', 'bm25-paper', 'bm25', 'bm25+qe', 'rm3',
@@ -57,7 +42,7 @@ const ALL_METHODS = [
   'minilm:bm25', 'minilm:bm25+qe', 'bge:bm25+qe', 'minilm:rrf-bm25qe+qwen3', 'bge:rrf-bm25qe+qwen3',
   'minilm:rrf-bm25qe+nomic', 'bge:rrf-bm25qe+nomic',
 ] as const;
-// fixed before running, not tuned on the test questions
+// Fixed before running, never tuned on the test questions.
 const EXPANSION_WEIGHT = 0.5;
 const PREFERENCE_WEIGHT = 0.5; // added to the per-question max-normalised BM25 score
 const PREFERENCE_QUESTION_MIN = 0.5; // Laya P(question asks for preferences) needed to apply the tags
@@ -72,14 +57,13 @@ const limit = Number(arg('limit', '0'));
 const dataset = arg('dataset', 'longmemeval_s_cleaned');
 const methods = arg('methods', 'bm25-paper,bm25,bm25-fuzzy,laya,bm25+laya').split(',') as Method[];
 for (const m of methods) if (!ALL_METHODS.includes(m)) throw new Error(`unknown method ${m}`);
-// a re-ranker needs its first stage computed in the same run
 for (const m of methods) {
   const base = m.split(':')[1];
   if (base && !methods.includes(base as Method)) throw new Error(`${m} needs ${base} in --methods`);
 }
 const index = `bench-${dataset.replace(/_/g, '-')}-${granularity}`;
-const dataFile = fileURLToPath(new URL(`${dataset}.json`, DATA));
-const outDir = new URL('results/', DATA);
+const dataFile = `${DATA}/${dataset}.json`;
+const outDir = pathToFileURL(`${DATA}/results/`);
 mkdirSync(outDir, { recursive: true });
 
 await indexCorpus();
@@ -111,7 +95,6 @@ type Row = {
   corpusSize: number;
   layaPeakMb?: number;
 };
-// --tag keeps a separate progress file, e.g. to add a retriever to an already finished run
 const tag = arg('tag', '');
 const progressFile = new URL(`${dataset}-${granularity}${tag ? `-${tag}` : ''}.progress.jsonl`, outDir);
 if (process.argv.includes('--fresh')) rmSync(progressFile, { force: true });
@@ -146,8 +129,6 @@ prefTags.save();
 console.log(`${evaluatedCount} questions evaluated, ${skipped} excluded (abstention/no-target, as in the official script)`);
 report();
 
-// --- evaluation --------------------------------------------------------------------------
-
 async function evaluate(q: Question): Promise<Row> {
   const corpus = buildCorpus(q, granularity);
   const ids = corpus.map((d) => d.id);
@@ -177,7 +158,7 @@ async function evaluate(q: Question): Promise<Row> {
     row.scanned.bm25 = 0;
   }
   if (methods.includes('bm25+qe')) {
-    const expansion = await expander.expand(q.question_id, q.question); // LLM time excluded: cached / reported separately
+    const expansion = await expander.expand(q.question_id, q.question); // LLM time is reported separately
     t = Date.now();
     rankings['bm25+qe'] = complete(await bm25Ranking(q, position, false, expansion), corpus.length);
     row.latencyMs['bm25+qe'] = Date.now() - t;
@@ -190,7 +171,7 @@ async function evaluate(q: Question): Promise<Row> {
     row.scanned.rm3 = 0;
   }
   for (const [e, embedder] of Object.entries(embedders)) {
-    // embedding the documents is index-time work in a real system: done first, not timed
+    // document embedding is index-time work: done first, not timed
     await embedder.embedDocs(corpus.map((d) => d.text));
     t = Date.now();
     const dense = await embedder.ranking(corpus.map((d) => d.text), q.question);
@@ -337,12 +318,12 @@ async function sparseRanking(q: Question, position: Map<string, number>): Promis
 
 async function layaScan(docs: Doc[], question: string): Promise<number[]> {
   if (docs.length === 0) return [];
-  const res = (await post(`${LAYA}/v1/scan`, {
-    states: docs.map((d) => d.text),
-    question: `Does this message contain information that helps answer the question: "${question}"?`,
-  })) as { scores: number[]; peak_mb?: number };
-  layaPeakMb = Math.max(layaPeakMb, res.peak_mb ?? 0);
-  return res.scores;
+  const { scores, peakMb } = await scan(
+    docs.map((d) => d.text),
+    `Does this message contain information that helps answer the question: "${question}"?`,
+  );
+  layaPeakMb = Math.max(layaPeakMb, peakMb ?? 0);
+  return scores;
 }
 
 /** Stable sort of indices by score, highest first. */
@@ -369,8 +350,6 @@ function metricsFor(ranking: number[], correct: string[], ids: string[]): Record
   }
   return out;
 }
-
-// --- data --------------------------------------------------------------------------------
 
 /** Stream the dataset's top-level array one question at a time. */
 async function* questions(): AsyncGenerator<Question> {
@@ -460,8 +439,6 @@ async function indexSparseCorpus(): Promise<void> {
   writeFileSync(marker, String(total));
   console.log(`indexed ${total} sparse docs`);
 }
-
-// --- reporting ---------------------------------------------------------------------------
 
 function report(): void {
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);

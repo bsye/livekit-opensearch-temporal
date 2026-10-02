@@ -1,9 +1,5 @@
-// Line-for-line ports of LongMemEval's official retrieval evaluation, so results are comparable
-// with published numbers:
-//   src/retrieval/eval_utils.py            → dcg, ndcg, evaluateRetrieval, evaluateRetrievalTurn2Session
-//   src/retrieval/run_retrieval.py         → processItemFlatIndex (corpus + labels), K values,
-//                                            and the abstention / no-target exclusions
-// https://github.com/xiaowu0162/LongMemEval (MIT)
+// Line-for-line ports of LongMemEval's eval_utils.py and run_retrieval.py, so results are comparable
+// with the paper. https://github.com/xiaowu0162/LongMemEval (MIT)
 
 export const KS = [1, 3, 5, 10, 30, 50];
 export type Granularity = 'session' | 'turn';

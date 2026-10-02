@@ -1,18 +1,15 @@
-// Dense retrieval with modern embedding models served by LM Studio on the Apple GPU
-// (OpenAI-compatible /v1/embeddings). Benchmark only. Vectors are L2-normalised and cached per
-// distinct text, in memory and on disk, so later runs (hybrids, re-ranking) don't re-embed.
+// Dense retrieval via LM Studio's /v1/embeddings. Vectors are normalised and cached on disk per distinct text.
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-
-const LLM = process.env.LLM_BASE_URL ?? 'http://localhost:1234/v1';
+import { env } from '@voice/config';
 const BATCH = 64;
 
 export interface EmbedderSpec {
-  name: string; // method suffix, e.g. "qwen3"
-  model: string; // LM Studio model id
+  name: string;
+  model: string;
   dim: number;
-  queryPrefix: string; // as each model card prescribes
+  queryPrefix: string; // as the model card prescribes
   docPrefix: string;
 }
 
@@ -21,7 +18,6 @@ export const EMBEDDERS: Record<string, EmbedderSpec> = {
     name: 'qwen3',
     model: 'text-embedding-qwen3-embedding-0.6b',
     dim: 1024,
-    // Qwen3-Embedding: instruction on the query side only
     queryPrefix: "Instruct: Given a question about the user's past conversations, retrieve the user message that helps answer it\nQuery:",
     docPrefix: '',
   },
@@ -50,7 +46,7 @@ export class Embedder {
       const keys = readFileSync(this.keysFile, 'utf8').split('\n').filter(Boolean);
       const data = readFileSync(this.dataFile);
       const floats = new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
-      // an interrupted append can leave one side longer; use what both files agree on
+      // an interrupted append can leave one file longer
       const n = Math.min(keys.length, Math.floor(floats.length / spec.dim));
       for (let i = 0; i < n; i++) this.vectors.set(keys[i], floats.slice(i * spec.dim, (i + 1) * spec.dim));
       console.log(`${spec.name}: ${n} cached embeddings loaded`);
@@ -86,7 +82,7 @@ export class Embedder {
   }
 
   private async request(input: string[]): Promise<Float32Array[]> {
-    const res = await fetch(`${LLM}/embeddings`, {
+    const res = await fetch(`${env('LLM_BASE_URL')}/embeddings`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: this.spec.model, input }),

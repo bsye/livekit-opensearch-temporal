@@ -1,40 +1,43 @@
-// Speech-to-speech (NVIDIA NemotronLabs VoiceChat) vs the cascade (Gemma 26B), on the same turns,
-// tools and memory:
-//   action  50 spoken requests for a tool (router bench)   → did it call a tool?
-//   chat    50 spoken turns that need no tool              → did it stay out of tools?
-//   memory  LongMemEval library questions (loaded memory)  → did it recall, and answer right?
-// Modes:
-//   s2s       VoiceChat hears the turn, calls tools itself on its function channel
-//   s2s+laya  as s2s, plus Laya routes the model's own live transcript at end of speech and, for
-//             memory turns, runs recall and forces the call + result in before the model decides
-//   cascade   Gemma 26B (LM Studio) on the turn text with the same tools (perfect transcript, no audio)
-// Tool results are identical across modes. Memory answers are judged by Gemma with LongMemEval's prompt.
-//
-//   npm run bench -w voicechat-bench -- [--sets action,chat,memory] [--modes s2s,s2s+laya,cascade] [--limit N] [--verbose]
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { recallBrief } from 'livekit-temporal/memory';
-import { warmReranker } from 'livekit-temporal/rerank';
-import { ACTION, CHAT } from '../../router/src/turns.js';
-import { MEMORY_RULES, NVIDIA_SYSTEM_MESSAGE, VOICECHAT_TOOLS } from '../../../agents/voice-agent/src/s2s_prompt.js';
+/**
+ * Speech-to-speech (NVIDIA VoiceChat) vs the cascade's LLM on the same turns, tools and memory:
+ *   action  50 spoken tool requests      → did it call a tool?
+ *   chat    50 turns that need no tool   → did it stay out of tools?
+ *   memory  the LongMemEval library      → did it recall, and answer right (LongMemEval's judge prompt)?
+ * Modes: s2s (the model calls tools itself), s2s+laya (Laya routes the model's own transcript and forces
+ * recall in for memory turns), cascade (Gemma on a perfect transcript, no audio).
+ *
+ *   npm run bench -w @bench/voicechat -- [--sets action,chat,memory] [--modes s2s,s2s+laya,cascade] [--limit N] [--verbose]
+ */
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { libraryQuestions } from '@bench/longmemeval/library';
+import { ACTION, CHAT } from '@bench/router/turns';
+import { prompt, VOICECHAT_TOOLS } from '@voice/agent/s2s-prompt';
+import { dataPath, env } from '@voice/config';
+import { route } from '@voice/laya';
+import { recallBrief, warmReranker } from '@voice/memory';
+import {
+  ascii,
+  FRAME_MS,
+  FRAME_SAMPLES,
+  parseToolCalls,
+  stripToolResponses,
+  VoiceChatSession,
+  type ToolCall,
+} from '@voice/voicechat';
 import { speak } from './speech.js';
-import { ascii, FRAME_MS, FRAME_SAMPLES, parseToolCalls, systemPrompt, type ToolCall, type ToolSpec, VoiceChatSession } from '../../../agents/voice-agent/src/voicechat.js';
 
-const VOICECHAT = process.env.VOICECHAT_URL ?? 'ws://localhost:8200';
-const LLM = process.env.LLM_BASE_URL ?? 'http://localhost:1234/v1';
-const LAYA = process.env.LAYA_BASE_URL ?? 'http://localhost:8100';
+const VOICECHAT = env('VOICECHAT_URL');
+const LLM = env('LLM_BASE_URL');
 const arg = (name: string, def: string) => (process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : def);
 const SETS = arg('--sets', 'action,chat,memory').split(',');
 const MODES = arg('--modes', 's2s,s2s+laya,cascade').split(',');
 const LIMIT = Number(arg('--limit', '1000'));
 const VERBOSE = process.argv.includes('--verbose');
-const OUT = fileURLToPath(new URL('../../../data/benchmarks/voicechat/', import.meta.url));
+const OUT = dataPath('benchmarks', 'voicechat');
 
-const LEAD_SILENCE_FRAMES = 6; // 0.5 s before the user speaks
-const QUIET_AFTER_REPLY_MS = 1500; // reply over: no new reply token for this long
+const LEAD_SILENCE_FRAMES = 6;
+const QUIET_AFTER_REPLY_MS = 1500;
 const MAX_AFTER_SPEECH_MS = 20_000;
-
-const TOOLS: ToolSpec[] = VOICECHAT_TOOLS;
 
 const INSTRUCTIONS = (now: Date) =>
   'You are a helpful voice assistant. Keep replies short and conversational: one or two sentences. ' +
@@ -44,7 +47,6 @@ const INSTRUCTIONS = (now: Date) =>
   'at different times, the most recent one is current; if it does not answer the question, say you do not remember. ' +
   `Today is ${now.toDateString()}.`;
 
-// ---- cases
 function groupBy<T>(xs: T[], key: (x: T) => string): Record<string, T[]> {
   const out: Record<string, T[]> = {};
   for (const x of xs) (out[key(x)] ??= []).push(x);
@@ -53,15 +55,10 @@ function groupBy<T>(xs: T[], key: (x: T) => string): Record<string, T[]> {
 interface Case {
   set: 'action' | 'chat' | 'memory';
   text: string;
-  type?: string; // LongMemEval question type
+  type?: string;
   answer?: string;
 }
-const sheet = readFileSync(new URL('../../../data/benchmarks/longmemeval/library-questions.md', import.meta.url), 'utf8');
-const memory: Case[] = sheet
-  .split('\n')
-  .filter((l) => l.startsWith('| ') && !l.startsWith('| type'))
-  .map((l) => l.split(' | '))
-  .map((c) => ({ set: 'memory' as const, type: c[0].replace('| ', ''), text: c[2].trim(), answer: c[3].replace(/ \|$/, '').trim() }));
+const memory: Case[] = libraryQuestions().map((q) => ({ set: 'memory', type: q.type, text: q.question, answer: q.answer }));
 // spread the limit over question types
 const byType = groupBy(memory, (c) => c.type!);
 const memoryCases: Case[] = [];
@@ -73,7 +70,7 @@ const cases: Case[] = [
   ...(SETS.includes('memory') ? memoryCases : []),
 ];
 
-// ---- tools (same results for every mode)
+// Same tool results in every mode.
 async function runTool(call: ToolCall): Promise<string> {
   const a = call.arguments as Record<string, string>;
   switch (call.name) {
@@ -92,31 +89,6 @@ async function runTool(call: ToolCall): Promise<string> {
 
 const recallForVoice = async (question: string) => (await recallBrief({ question })).text;
 
-// ---- Laya router (the 3-way choice from benchmarks/router)
-async function layaRoute(text: string): Promise<'past' | 'action' | 'chat'> {
-  const res = await fetch(`${LAYA}/v1/systemone`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      state: `User: ${text}`,
-      questions: {
-        q: {
-          type: 'choice',
-          instructions: 'What does the user want from the assistant in this turn?',
-          criteria: {
-            A: 'Information from their own past or from earlier conversations with the assistant',
-            B: 'An action: a reminder, timer, message, email, calendar entry, call or other task',
-            C: 'Conversation, general knowledge, advice or anything else',
-          },
-        },
-      },
-    }),
-  });
-  const choice = ((await res.json()) as { answers: { q: { choice: string } } }).answers.q.choice;
-  return ({ A: 'past', B: 'action', C: 'chat' } as const)[choice as 'A' | 'B' | 'C'] ?? 'chat';
-}
-
-// ---- one turn through VoiceChat
 interface Result {
   mode: string;
   set: string;
@@ -140,7 +112,7 @@ interface Result {
 
 async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
   const audio = await speak(c.text);
-  const s = await VoiceChatSession.open(VOICECHAT, systemPrompt(`${NVIDIA_SYSTEM_MESSAGE}\n\n${MEMORY_RULES} Today is ${new Date().toDateString()}.`, TOOLS));
+  const s = await VoiceChatSession.open(VOICECHAT, prompt());
   const r: Result = { mode: withLaya ? 's2s+laya' : 's2s', set: c.set, type: c.type, text: c.text, reply: '', tools: [] };
   const frames: Int16Array[] = [];
   for (let i = 0; i < LEAD_SILENCE_FRAMES; i++) frames.push(new Int16Array(FRAME_SAMPLES));
@@ -154,9 +126,8 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
   let handled = 0;
   let pending: Promise<void> = Promise.resolve();
   let resultInAt = 0; // wall clock when the last tool result finished going in
-  const toolText = () => s.functionText.replace(/<TOOL_RESPONSE>[\s\S]*?<\/TOOL_RESPONSE>/g, '');
+  const toolText = () => stripToolResponses(s.functionText);
 
-  // the model's own tool calls: run them and return the result as soon as the call closes
   s.onFunction = () => {
     const calls = parseToolCalls(toolText());
     for (; handled < calls.length; handled++) {
@@ -173,7 +144,7 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
     }
   };
 
-  // real-time: one 80 ms frame per 80 ms of wall clock
+  // real time: one 80 ms frame per 80 ms of wall clock
   const start = Date.now();
   let i = 0;
   const sendUntil = async (done: () => boolean) => {
@@ -187,7 +158,7 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
           // route on what the model heard; prefetch memory before it decides
           const heard = s.userText;
           pending = pending.then(async () => {
-            r.routed = await layaRoute(heard);
+            r.routed = await route(heard);
             if (r.routed !== 'past' || parseToolCalls(toolText()).length) return;
             const call = { name: 'recall', arguments: { question: heard } };
             const out = await runTool(call);
@@ -215,7 +186,6 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
     return replied && !toolsBusy && now - lastReplyAt() > QUIET_AFTER_REPLY_MS;
   });
   await pending;
-  await s.drain();
   const st = await s.stats();
   s.close();
   r.heard = s.userText;
@@ -229,7 +199,6 @@ async function s2sTurn(c: Case, withLaya: boolean): Promise<Result> {
   return r;
 }
 
-// ---- the cascade's LLM on the same turn (text in, same tools and results)
 async function cascadeTurn(c: Case): Promise<Result> {
   const r: Result = { mode: 'cascade', set: c.set, type: c.type, text: c.text, reply: '', tools: [] };
   const messages: Record<string, unknown>[] = [
@@ -242,11 +211,11 @@ async function cascadeTurn(c: Case): Promise<Result> {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: process.env.LLM_MODEL,
+        model: env('LLM_MODEL'),
         reasoning_effort: 'none',
         temperature: 0,
         messages,
-        tools: TOOLS.map((t) => ({ type: 'function', function: t })),
+        tools: VOICECHAT_TOOLS.map((t) => ({ type: 'function', function: t })),
       }),
     });
     const msg = ((await res.json()) as { choices: { message: Record<string, unknown> }[] }).choices[0].message;
@@ -267,9 +236,9 @@ async function cascadeTurn(c: Case): Promise<Result> {
   return r;
 }
 
-// ---- LongMemEval's answer judge (its default prompt), with Gemma
+/** LongMemEval's answer-judge prompt, with the cascade's LLM as judge. */
 async function judge(c: Case, reply: string): Promise<boolean> {
-  const prompt =
+  const judgePrompt =
     'I will give you a question, a correct answer, and a response from a model. Please answer yes if the response ' +
     'contains the correct answer. Otherwise, answer no. If the response is equivalent to the correct answer or contains ' +
     'all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a ' +
@@ -279,15 +248,14 @@ async function judge(c: Case, reply: string): Promise<boolean> {
   const res = await fetch(`${LLM}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: process.env.LLM_MODEL, reasoning_effort: 'none', temperature: 0, max_tokens: 5, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model: env('LLM_MODEL'), reasoning_effort: 'none', temperature: 0, max_tokens: 5, messages: [{ role: 'user', content: judgePrompt }] }),
   });
   const out = ((await res.json()) as { choices: { message: { content: string } }[] }).choices[0].message.content;
   return /yes/i.test(out);
 }
 
-// ---- run
 mkdirSync(OUT, { recursive: true });
-const log = `${OUT}results-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.jsonl`;
+const log = `${OUT}/results-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.jsonl`;
 await warmReranker();
 console.log(`${cases.length} cases × ${MODES.join(', ')} → ${log}`);
 const results: Result[] = [];
@@ -314,7 +282,6 @@ for (const c of cases) {
   }
 }
 
-// ---- summary
 const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(0)}%` : '-');
 const med = (xs: (number | undefined)[]) => {
   const v = xs.filter((x): x is number => Number.isFinite(x)).sort((a, b) => a - b);

@@ -1,5 +1,0 @@
-redis:
-    address: localhost:6379
-api_key: devkey
-api_secret: secret
-ws_url: wss://livekit.localhost

@@ -1,0 +1,9 @@
+{
+  "name": "@voice/voicechat",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": { "ws": "^8.22.0" },
+  "devDependencies": { "@types/ws": "^8.18.2" }
+}

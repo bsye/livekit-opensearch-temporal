@@ -1,14 +1,13 @@
-// Learned sparse retrieval with OpenSearch's doc-only model (opensearch-neural-sparse-encoding-doc-v3-distill):
-// documents are expanded into weighted vocabulary terms at index time (ONNX export from
-// services/sparse-encoder, SPLADE max pooling + log(1+log(1+relu)) in the graph); queries need no model,
-// just the tokenizer and the model's IDF weights. Stored as rank_features and scored as a dot product with
-// rank_feature queries: an inverted index, no vectors. Benchmark only.
+/**
+ * Learned sparse retrieval with OpenSearch's doc-only model: documents are expanded into weighted
+ * vocabulary terms at index time (rank_features); queries only need the tokenizer and IDF weights.
+ */
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { AutoModel, AutoTokenizer, env, type PreTrainedModel, type PreTrainedTokenizer, type Tensor } from '@huggingface/transformers';
+import { dataPath } from '@voice/config';
 
 const DIR = 'sparse-doc-v3-distill';
-const MODELS = fileURLToPath(new URL('../../../data/models/', import.meta.url));
+const MODELS = `${dataPath('models')}/`;
 const BATCH = 32;
 
 let tokenizer: PreTrainedTokenizer;
@@ -16,7 +15,7 @@ let model: PreTrainedModel;
 let vocab: string[];
 let idf: Map<number, number>;
 let special: Set<number>;
-// distinct text → its features as a JSON string (compact; LongMemEval_M repeats each turn ~4x)
+// distinct text → features as a JSON string (LongMemEval_M repeats each turn ~4x)
 const cache = new Map<string, string>();
 
 export async function loadSparse(): Promise<void> {

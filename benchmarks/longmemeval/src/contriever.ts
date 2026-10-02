@@ -1,16 +1,14 @@
-// facebook/contriever as in LongMemEval's flat-contriever baseline: mean pooling over the last
-// hidden state (masked), dot-product scores, inputs truncated to 512 tokens. ONNX export from
-// services/contriever/export.sh, run with @huggingface/transformers (ONNX Runtime). Benchmark only.
-import { fileURLToPath } from 'node:url';
+// LongMemEval's flat-contriever baseline: masked mean pooling, dot product, 512-token truncation.
 import { AutoModel, AutoTokenizer, env, type PreTrainedModel, type PreTrainedTokenizer, type Tensor } from '@huggingface/transformers';
+import { dataPath } from '@voice/config';
 
 env.allowRemoteModels = false;
-env.localModelPath = fileURLToPath(new URL('../../../data/models/', import.meta.url));
+env.localModelPath = `${dataPath('models')}/`;
 
 const BATCH = 32;
 let tokenizer: PreTrainedTokenizer;
 let model: PreTrainedModel;
-// LongMemEval_M reuses haystack sessions across questions; embed each distinct text once
+// LongMemEval_M reuses sessions across questions: embed each distinct text once
 const cache = new Map<string, Float32Array>();
 const CACHE_MAX = 400_000;
 
@@ -21,7 +19,7 @@ export async function loadContriever(): Promise<void> {
 
 export async function embed(texts: string[]): Promise<Float32Array[]> {
   const out: (Float32Array | undefined)[] = texts.map((t) => cache.get(t));
-  // sorted by length so each batch pads to similar lengths (mixing 10- and 500-token turns wastes most compute)
+  // sorted by length so each batch pads to similar lengths
   const missing = [...new Set(texts.filter((_, i) => !out[i]))].sort((a, b) => a.length - b.length);
   for (let s = 0; s < missing.length; s += BATCH) {
     const batch = missing.slice(s, s + BATCH);

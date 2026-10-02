@@ -1,12 +1,10 @@
-// Test utterances as audio: spoken by the cascade's Kokoro TTS (mlx-audio), resampled to the 16 kHz
-// the speech-to-speech model listens at, cached under data/benchmarks/voicechat/audio.
+// Test utterances spoken by the cascade's TTS in another voice, resampled to 16 kHz and cached.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { dataPath, env } from '@voice/config';
 
-const SPEECH = process.env.SPEECH_BASE_URL ?? 'http://localhost:8000/v1';
-const DIR = fileURLToPath(new URL('../../../data/benchmarks/voicechat/audio/', import.meta.url));
-const VOICE = process.env.BENCH_USER_VOICE ?? 'am_michael'; // a different voice from the agent's
+const DIR = `${dataPath('benchmarks', 'voicechat', 'audio')}/`;
+const VOICE = 'am_michael';
 
 export async function speak(text: string): Promise<Int16Array> {
   mkdirSync(DIR, { recursive: true });
@@ -15,10 +13,10 @@ export async function speak(text: string): Promise<Int16Array> {
     const b = readFileSync(file);
     return new Int16Array(b.buffer, b.byteOffset, b.byteLength / 2);
   }
-  const res = await fetch(`${SPEECH}/audio/speech`, {
+  const res = await fetch(`${env('SPEECH_BASE_URL')}/audio/speech`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: process.env.TTS_MODEL, voice: VOICE, input: text, response_format: 'wav' }),
+    body: JSON.stringify({ model: env('TTS_MODEL'), voice: VOICE, input: text, response_format: 'wav' }),
   });
   if (!res.ok) throw new Error(`tts: ${res.status} ${await res.text()}`);
   const pcm = resample(parseWav(Buffer.from(await res.arrayBuffer())), 16_000);
@@ -26,7 +24,7 @@ export async function speak(text: string): Promise<Int16Array> {
   return pcm;
 }
 
-/** Mono samples in [-1, 1] and their rate, from a PCM16 or float32 WAV. */
+/** Mono samples in [-1, 1] from a PCM16 or float32 WAV. */
 function parseWav(b: Buffer): { samples: Float32Array; rate: number } {
   let off = 12;
   let rate = 0, bits = 16, channels = 1, format = 1;
@@ -53,7 +51,7 @@ function parseWav(b: Buffer): { samples: Float32Array; rate: number } {
   throw new Error('wav without data chunk');
 }
 
-/** Linear-interpolation resample to PCM16 (speech, downsampling 24 → 16 kHz: fine for a model input). */
+/** Linear interpolation: crude, but fine for a model's input. */
 function resample({ samples, rate }: { samples: Float32Array; rate: number }, to: number): Int16Array {
   const n = Math.floor((samples.length * to) / rate);
   const out = new Int16Array(n);

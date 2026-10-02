@@ -1,6 +1,5 @@
-// Port of rank_bm25's BM25Okapi (https://github.com/dorianbrown/rank_bm25, Apache-2.0) as used by
-// LongMemEval's flat-bm25 baseline: documents and query split on " " only (no lowercasing, no
-// punctuation handling, no stemming), k1=1.5, b=0.75, negative idf floored at epsilon * mean idf.
+// Port of rank_bm25's BM25Okapi (https://github.com/dorianbrown/rank_bm25, Apache-2.0), the paper's
+// BM25: text split on spaces only, no lowercasing or stemming.
 export function bm25OkapiRanking(corpus: string[], query: string, k1 = 1.5, b = 0.75, epsilon = 0.25): number[] {
   const docs = corpus.map((d) => d.split(' '));
   const docFreqs = docs.map((doc) => {

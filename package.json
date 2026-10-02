@@ -1,14 +1,24 @@
 {
-  "name": "livekit-localhost",
+  "name": "local-voice-agent",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.6"
+  },
   "workspaces": [
+    "packages/*",
     "apps/*",
-    "agents/*",
     "benchmarks/*"
   ],
   "scripts": {
-    "meet": "scripts/meet.sh",
+    "setup": "scripts/setup.sh",
+    "start": "scripts/start.sh",
     "stop": "scripts/stop.sh",
     "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }

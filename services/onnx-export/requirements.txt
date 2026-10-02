@@ -1,0 +1,4 @@
+torch
+transformers<5
+onnx
+huggingface_hub

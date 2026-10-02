@@ -1,0 +1,28 @@
+{
+  "name": "@voice/agent",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./s2s-prompt": "./src/s2s/prompt.ts"
+  },
+  "scripts": {
+    "start:cascade": "node --env-file=../../.env --import tsx src/cascade/agent.ts dev",
+    "start:s2s": "node --env-file=../../.env --import tsx src/s2s/agent.ts dev",
+    "warm:s2s": "node --env-file=../../.env --import tsx src/s2s/warm.ts",
+    "typecheck": "tsc --noEmit",
+    "start:omni": "node --env-file=../../.env --import tsx src/omni/agent.ts dev"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.9.1",
+    "@livekit/agents-plugin-openai": "^1.9.1",
+    "@livekit/agents-plugin-silero": "^1.9.1",
+    "@livekit/rtc-node": "^1.1.0",
+    "@temporalio/client": "^1.24.0",
+    "@voice/config": "*",
+    "@voice/laya": "*",
+    "@voice/memory": "*",
+    "@voice/temporal": "*",
+    "@voice/voicechat": "*",
+    "zod": "^3.25.76"
+  }
+}

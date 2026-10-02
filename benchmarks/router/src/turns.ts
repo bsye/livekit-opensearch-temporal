@@ -1,6 +1,24 @@
-// Hand-written turns for the router test (the "past" set also includes the 100 LongMemEval library
-// questions, read at run time). Some are written as speech-to-text output: lowercase, no punctuation,
-// misheard words.
+import { libraryQuestions } from '@bench/longmemeval/library';
+
+export type Label = 'past' | 'action' | 'chat';
+
+export interface Turn {
+  text: string;
+  label: Label;
+  group: string;
+}
+
+/** 220 turns: the 100 library questions + 20 conversational ones need memory; 50 actions; 50 chat. */
+export function routerTurns(): Turn[] {
+  return [
+    ...libraryQuestions().map((q) => ({ text: q.question, label: 'past' as const, group: `library:${q.type}` })),
+    ...PAST_EXTRA.map((text) => ({ text, label: 'past' as const, group: 'past:conversational' })),
+    ...ACTION.map((text) => ({ text, label: 'action' as const, group: 'action' })),
+    ...CHAT.map((text) => ({ text, label: 'chat' as const, group: 'chat' })),
+  ];
+}
+
+// Some turns are written the way speech-to-text returns them: lowercase, no punctuation.
 export const PAST_EXTRA = [
   'What did we talk about yesterday?',
   'Did I tell you about my sister\'s wedding?',

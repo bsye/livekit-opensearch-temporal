@@ -1,14 +1,20 @@
 {
-  "name": "longmemeval-bench",
+  "name": "@bench/longmemeval",
   "private": true,
   "type": "module",
-  "description": "LongMemEval retrieval benchmark for conversation memory (BM25 / parallel Laya / hybrid)",
+  "exports": {
+    "./library": "./src/library.ts"
+  },
   "scripts": {
     "bench": "node --max-old-space-size=6144 --env-file=../../.env --import tsx src/run.ts",
+    "load-library": "node --max-old-space-size=6144 --env-file=../../.env --import tsx src/load-library.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
+    "@voice/config": "*",
+    "@voice/laya": "*",
+    "@voice/memory": "*",
     "stream-json": "^1.9.1"
   },
   "devDependencies": {

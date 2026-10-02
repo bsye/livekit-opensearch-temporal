@@ -1,0 +1,16 @@
+{
+  "name": "@voice/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=../../.env --import tsx src/worker.ts",
+    "backfill-memory": "node --env-file=../../.env --import tsx src/backfill-memory.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@temporalio/worker": "^1.24.0",
+    "@voice/config": "*",
+    "@voice/memory": "*",
+    "@voice/temporal": "*"
+  }
+}

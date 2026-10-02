@@ -1,7 +1,4 @@
-// RM3 pseudo-relevance feedback (Lavrenko & Croft relevance model, interpolated), following Anserini's
-// implementation and defaults: fbDocs=10, fbTerms=10, originalQueryWeight=0.5. Feedback documents are
-// the top BM25 hits; P(w|D) uses OpenSearch's own analyzed term vectors (english analyzer), so terms
-// are the same stems the index uses. Classic query expansion with no model and no LLM.
+// RM3 pseudo-relevance feedback with Anserini's defaults, on OpenSearch's own analyzed term vectors.
 const FB_DOCS = 10;
 const FB_TERMS = 10;
 const ORIGINAL_WEIGHT = 0.5;

@@ -1,0 +1,14 @@
+{
+  "name": "@voice/translator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=../../.env --import tsx src/translator.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@voice/config": "*",
+    "@voice/temporal": "*",
+    "livekit-server-sdk": "^2.19.1"
+  }
+}

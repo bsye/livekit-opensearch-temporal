@@ -15,6 +15,7 @@
     "@temporalio/common": "^1.24.0",
     "@temporalio/workflow": "^1.24.0",
     "@voice/config": "*",
-    "@voice/memory": "*"
+    "@voice/memory": "*",
+    "@voice/text": "*"
   }
 }

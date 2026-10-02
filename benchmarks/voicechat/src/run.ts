@@ -6,6 +6,7 @@ import { prompt, VOICECHAT_TOOLS } from '@voice/agent/s2s-prompt'
 import { dataPath, env } from '@voice/config'
 import { route } from '@voice/laya'
 import { recallBrief, warmReranker } from '@voice/memory'
+import { fileStamp, removeBetween } from '@voice/text'
 import {
   ascii,
   FRAME_MS,
@@ -223,9 +224,7 @@ async function cascadeTurn(c: Case): Promise<Result> {
     const msg = ((await res.json()) as { choices: { message: Record<string, unknown> }[] }).choices[0].message
     const calls = (msg.tool_calls ?? []) as { id: string; function: { name: string; arguments: string } }[]
     if (!calls.length) {
-      r.reply = String(msg.content ?? '')
-        .replace(/<\|channel>[\s\S]*?<channel\|>/g, '')
-        .trim()
+      r.reply = removeBetween(String(msg.content ?? ''), '<|channel>', '<channel|>').trim()
       r.answerMs = Date.now() - t0
       break
     }
@@ -260,11 +259,11 @@ async function judge(c: Case, reply: string): Promise<boolean> {
     }),
   })
   const out = ((await res.json()) as { choices: { message: { content: string } }[] }).choices[0].message.content
-  return /yes/i.test(out)
+  return out.toLowerCase().includes('yes')
 }
 
 mkdirSync(OUT, { recursive: true })
-const log = `${OUT}/results-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.jsonl`
+const log = `${OUT}/results-${fileStamp()}.jsonl`
 await warmReranker()
 console.log(`${cases.length} cases × ${MODES.join(', ')} → ${log}`)
 const results: Result[] = []

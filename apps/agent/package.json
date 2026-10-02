@@ -5,7 +5,8 @@
   "exports": {
     "./s2s-prompt": "./src/s2s/prompt.ts",
     "./omni-prompt": "./src/omni/prompt.ts",
-    "./tool-specs": "./src/tools/specs.ts"
+    "./tool-specs": "./src/tools/specs.ts",
+    "./s2s-routing": "./src/s2s/routing.ts"
   },
   "scripts": {
     "start:cascade": "node --env-file=../../.env --import tsx src/cascade/agent.ts dev",
@@ -24,6 +25,7 @@
     "@voice/laya": "*",
     "@voice/memory": "*",
     "@voice/temporal": "*",
+    "@voice/text": "*",
     "@voice/voicechat": "*",
     "zod": "^3.25.76"
   }

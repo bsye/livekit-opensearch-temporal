@@ -8,6 +8,7 @@ import {
   upsertSearchAttributes,
   workflowInfo,
 } from '@temporalio/workflow'
+import { tableCell } from '@voice/text'
 import {
   actorIcon,
   isRoomSignal,
@@ -72,7 +73,6 @@ export async function roomSession(): Promise<RoomState & { endReason: string }> 
 }
 
 function details(state: RoomState): string {
-  const cell = (s: string) => s.replace(/\|/g, '/').replace(/\n/g, ' ')
   const people = Object.values(state.participants).map(
     (p) =>
       `| ${actorIcon(p.kind)} ${p.identity} | ${p.kind ?? 'STANDARD'} | ${Object.values(p.tracks)
@@ -84,7 +84,7 @@ function details(state: RoomState): string {
     .slice(-TURNS_IN_DETAILS)
     .map(
       (t) =>
-        `| ${t.index} | ${cell(truncate(t.userText, 80))} | ${cell(truncate(t.reply, 100))} | ${[
+        `| ${t.index} | ${tableCell(truncate(t.userText, 80))} | ${tableCell(truncate(t.reply, 100))} | ${[
           t.memory?.text ? '🧠 memory' : '',
           ...t.tools.map((s) => `🛠 ${s.name}`),
           ...t.actions

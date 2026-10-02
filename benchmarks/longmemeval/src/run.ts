@@ -82,7 +82,7 @@ for (const m of methods) {
   const base = m.split(':')[1]
   if (base && !methods.includes(base as Method)) throw new Error(`${m} needs ${base} in --methods`)
 }
-const index = `bench-${dataset.replace(/_/g, '-')}-${granularity}`
+const index = `bench-${dataset.replaceAll('_', '-')}-${granularity}`
 const dataFile = `${DATA}/${dataset}.json`
 const outDir = pathToFileURL(`${DATA}/results/`)
 mkdirSync(outDir, { recursive: true })
@@ -602,7 +602,7 @@ function report(): void {
   }
   const text = lines.join('\n')
   console.log(`\n${text}`)
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const stamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
   writeFileSync(new URL(`${dataset}-${granularity}-${stamp}.md`, outDir), `${text}\n`)
 }
 

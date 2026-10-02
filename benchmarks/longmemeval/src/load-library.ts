@@ -1,5 +1,6 @@
 import { createReadStream, writeFileSync } from 'node:fs'
 import { bulkIndex, deleteRoom, ensureIndex, type MemoryDoc, refresh, toMemoryDoc } from '@voice/memory'
+import { tableCell } from '@voice/text'
 import StreamArray from 'stream-json/streamers/StreamArray.js'
 import { LIBRARY_DIR, LIBRARY_ROOM, LIBRARY_SHEET } from './library.js'
 
@@ -34,9 +35,12 @@ async function* questions(): AsyncGenerator<Question> {
 }
 
 function parseDate(s: string): number {
-  const m = s.match(/(\d{4})\/(\d{2})\/(\d{2}) \(\w+\) (\d{2}):(\d{2})/)
-  if (!m) throw new Error(`bad date ${s}`)
-  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime()
+  const [date, , time] = s.split(' ')
+  const [year, month, day] = (date ?? '').split('/').map(Number)
+  const [hours, minutes] = (time ?? '').split(':').map(Number)
+  const at = new Date(year, month - 1, day, hours, minutes).getTime()
+  if (Number.isNaN(at)) throw new Error(`bad date ${s}`)
+  return at
 }
 
 console.log('scanning LongMemEval_M …')
@@ -108,7 +112,6 @@ await refresh()
 console.log(`indexed ${total} exchanges as room "${LIBRARY_ROOM}"`)
 
 const fmt = (ms: number) => new Date(ms).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
-const cell = (s: string | number) => String(s).replace(/\|/g, '/').replace(/\n/g, ' ')
 const sheet = [
   `# Library questions (${chosen.length}, each answerable from the loaded memory)`,
   '',
@@ -122,7 +125,7 @@ const sheet = [
     .sort((a, b) => a.question_type.localeCompare(b.question_type))
     .map(
       (q) =>
-        `| ${q.question_type} | ${fmt(parseDate(q.question_date) + offset)} | ${cell(q.question)} | ${cell(q.answer)} |`,
+        `| ${q.question_type} | ${fmt(parseDate(q.question_date) + offset)} | ${tableCell(q.question)} | ${tableCell(q.answer)} |`,
     ),
 ].join('\n')
 writeFileSync(LIBRARY_SHEET, `${sheet}\n`)

@@ -26,7 +26,7 @@ export function createActions({ temporal, room, user, auditor }: ActionDeps) {
 
   return {
     async setReminder({ text, time, day }: ReminderArgs): Promise<string> {
-      if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(time)) return 'time must be 24-hour HH:MM; ask the user for the time.'
+      if (!isClockTime(time)) return 'time must be 24-hour HH:MM; ask the user for the time.'
       const { sid, name } = room()
       const when = `${time} ${day}`
       const input = { text, fireAt: fireTime(time, day), when, roomSid: sid, participant: user() }
@@ -54,6 +54,19 @@ export function createActions({ temporal, room, user, auditor }: ActionDeps) {
 }
 
 export type Actions = ReturnType<typeof createActions>
+
+function isClockTime(time: string): boolean {
+  const [hours, minutes, extra] = time.split(':')
+  const isNumber = (part: string | undefined, digits: number[]) =>
+    part !== undefined && digits.includes(part.length) && [...part].every((c) => c >= '0' && c <= '9')
+  return (
+    extra === undefined &&
+    isNumber(hours, [1, 2]) &&
+    isNumber(minutes, [2]) &&
+    Number(hours) < 24 &&
+    Number(minutes) < 60
+  )
+}
 
 function fireTime(time: string, day: 'today' | 'tomorrow'): number {
   const [h, m] = time.split(':').map(Number)

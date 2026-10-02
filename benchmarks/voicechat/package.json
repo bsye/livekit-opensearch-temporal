@@ -13,6 +13,7 @@
     "@voice/config": "*",
     "@voice/laya": "*",
     "@voice/memory": "*",
+    "@voice/text": "*",
     "@voice/voicechat": "*"
   }
 }

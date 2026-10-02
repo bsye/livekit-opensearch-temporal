@@ -15,9 +15,10 @@
   },
   "dependencies": {
     "@bench/longmemeval": "*",
+    "@voice/agent": "*",
+    "@voice/config": "*",
     "@voice/laya": "*",
     "@voice/memory": "*",
-    "@voice/agent": "*",
-    "@voice/config": "*"
+    "@voice/text": "*"
   }
 }

@@ -1,3 +1,4 @@
+import { between, count, removeBetween } from '@voice/text'
 import WebSocket from 'ws'
 
 export const FRAME_SAMPLES = 1280
@@ -28,13 +29,13 @@ export function systemPrompt(instructions: string, tools: ToolSpec[]): string {
 }
 
 export function stripToolResponses(functionText: string): string {
-  return functionText.replace(/<TOOL_RESPONSE>[\s\S]*?<\/TOOL_RESPONSE>/g, '')
+  return removeBetween(functionText, '<TOOL_RESPONSE>', '</TOOL_RESPONSE>')
 }
 
 export function parseToolCalls(functionText: string): ToolCall[] {
   const calls: ToolCall[] = []
-  for (const m of functionText.matchAll(/<TOOLCALL>([\s\S]*?)<\/TOOLCALL>/g)) {
-    const parsed = safeJson(m[1]) ?? safeJson(repair(m[1]))
+  for (const raw of between(functionText, '<TOOLCALL>', '</TOOLCALL>')) {
+    const parsed = safeJson(raw) ?? safeJson(repair(raw))
     if (Array.isArray(parsed)) {
       for (const c of parsed as { name: string; arguments: unknown }[]) {
         const args = typeof c.arguments === 'string' ? (safeJson(c.arguments) ?? { raw: c.arguments }) : c.arguments
@@ -42,25 +43,51 @@ export function parseToolCalls(functionText: string): ToolCall[] {
       }
       continue
     }
-    const name = m[1].match(/"name"\s*:?\s*"([^"]+)"/)?.[1]
-    const args = m[1].match(/"arguments"?\s*:?\s*(\{[^{}]*\})/)?.[1]
+    const name = quotedValueAfter(raw, '"name"')
+    const args = objectAfter(raw, 'arguments')
     calls.push({
       name: name ?? '(unparsable)',
-      arguments: ((args && safeJson(args)) || { raw: m[1] }) as Record<string, unknown>,
+      arguments: ((args && safeJson(args)) || { raw }) as Record<string, unknown>,
     })
   }
   return calls
 }
 
-function repair(s: string): string {
-  let out = s.replace(/"(\w+) \{/g, '"$1": {').replace(/"(\w+) "/g, '"$1": "')
-  const open = (out.match(/\[/g) ?? []).length - (out.match(/\]/g) ?? []).length
-  if (open > 0) out += ']'.repeat(open)
-  return out
+function repair(json: string): string {
+  let out = ''
+  for (let i = 0; i < json.length; i++) {
+    out += json[i]
+    if (json[i] !== '"') continue
+    let j = i + 1
+    while (j < json.length && isWordChar(json[j])) j++
+    if (j > i + 1 && json[j] === ' ' && (json[j + 1] === '{' || json[j + 1] === '"')) {
+      out += `${json.slice(i + 1, j)}": `
+      i = j
+    }
+  }
+  const unclosed = count(out, '[') - count(out, ']')
+  return unclosed > 0 ? out + ']'.repeat(unclosed) : out
+}
+
+const isWordChar = (c: string) => c === '_' || c.toLowerCase() !== c.toUpperCase() || (c >= '0' && c <= '9')
+
+function quotedValueAfter(text: string, key: string): string | undefined {
+  const at = text.indexOf(key)
+  if (at === -1) return undefined
+  const open = text.indexOf('"', at + key.length)
+  const close = open === -1 ? -1 : text.indexOf('"', open + 1)
+  return close === -1 ? undefined : text.slice(open + 1, close)
+}
+
+function objectAfter(text: string, key: string): string | undefined {
+  const at = text.indexOf(key)
+  const open = at === -1 ? -1 : text.indexOf('{', at)
+  const close = open === -1 ? -1 : text.indexOf('}', open)
+  return close === -1 ? undefined : text.slice(open, close + 1)
 }
 
 function formatCall(call: ToolCall): string {
-  return JSON.stringify(call).replace(/":/g, '": ').replace(/,"/g, ', "')
+  return JSON.stringify(call).replaceAll('":', '": ').replaceAll(',"', ', "')
 }
 
 function safeJson(s: string): unknown {
@@ -71,13 +98,16 @@ function safeJson(s: string): unknown {
   }
 }
 
-export function ascii(s: string): string {
-  return s
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, ' - ')
+const ASCII_LOOKALIKES: Record<string, string> = { '‘': "'", '’': "'", '“': '"', '”': '"', '–': ' - ', '—': ' - ' }
+
+export function ascii(text: string): string {
+  return [...text]
+    .map((c) => ASCII_LOOKALIKES[c] ?? c)
+    .join('')
     .normalize('NFKD')
-    .replace(/[^\x20-\x7e\n]/g, '')
+    .split('')
+    .filter((c) => c === '\n' || (c >= ' ' && c <= '~'))
+    .join('')
 }
 
 export interface TextEvent {

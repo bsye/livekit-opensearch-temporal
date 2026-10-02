@@ -1,4 +1,5 @@
 import { ask } from '@voice/laya'
+import { sentences } from '@voice/text'
 import { expandQuery } from './expansion.js'
 import { rerankScores } from './rerank.js'
 import { ensureIndex, type MemoryDoc, search } from './store.js'
@@ -99,16 +100,18 @@ async function isPreferenceQuestion(question: string): Promise<boolean> {
 
 export const NOTHING_FOUND = 'Nothing found about that in earlier conversations (this conversation is above).'
 
-export async function recallBrief(q: RecallQuery, sentences = 3): Promise<{ text: string; top: number; hits: number }> {
+export async function recallBrief(
+  q: RecallQuery,
+  maxSentences = 3,
+): Promise<{ text: string; top: number; hits: number }> {
   const { hits } = await recall(q)
   const nothing = { text: NOTHING_FOUND, top: -Infinity, hits: 0 }
   if (!hits.length) return nothing
   const top = Math.max(...hits.map((h) => h.score))
   const candidates = hits.flatMap(({ doc }) =>
-    doc.userText
-      .split(/(?<=[.!?])\s+|\n+/)
-      .filter((s) => s.trim().length > 12 && !s.trim().endsWith('?'))
-      .map((s) => ({ s: s.trim().slice(0, 200), at: doc.endedAt })),
+    sentences(doc.userText)
+      .filter((s) => s.length > 12 && !s.endsWith('?'))
+      .map((s) => ({ s: s.slice(0, 200), at: doc.endedAt })),
   )
   if (!candidates.length) return nothing
   const scores = await rerankScores(
@@ -118,7 +121,7 @@ export async function recallBrief(q: RecallQuery, sentences = 3): Promise<{ text
   const best = candidates
     .map((c, i) => ({ ...c, score: scores[i] }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, sentences)
+    .slice(0, maxSentences)
     .sort((a, b) => a.at - b.at)
     .map((c) => `${new Date(c.at).toDateString().slice(4, 10)}: ${c.s}`)
   const text = `${best.join(' | ')} (oldest first; the last one is the most recent)`

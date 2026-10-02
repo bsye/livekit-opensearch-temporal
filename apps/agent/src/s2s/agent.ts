@@ -15,11 +15,13 @@ import { env } from '@voice/config'
 import { route } from '@voice/laya'
 import { recallBrief, warmReranker } from '@voice/memory'
 import { connectTemporal } from '@voice/temporal'
+import { isOpen, removeTags, trimStartChars } from '@voice/text'
 import { FRAME_SAMPLES, parseToolCalls, stripToolResponses, type ToolCall, VoiceChatSession } from '@voice/voicechat'
 import { RoomReporter } from '../reporting.js'
 import { createActions, type EmailArgs, type ReminderArgs } from '../tools/actions.js'
 import { ActionAuditor } from '../tools/audit.js'
 import { prompt } from './prompt.js'
+import { isFirstPerson, refersBack } from './routing.js'
 
 const INPUT_RATE = 16_000
 const OUTPUT_RATE = 22_050
@@ -28,9 +30,6 @@ const TURN_QUIET_MS = 1200
 const MAX_HOLD_MS = 2500
 const MAX_CALLS_PER_TURN = 3
 const STRONG_MATCH = 4
-const FIRST_PERSON = /\b(i|my|me|mine|i'm|i've|i'd|i'll)\b/i
-const REFERS_BACK =
-  /\b(previous|earlier|last time|before|remind me what|we (talked|discussed|spoke|said)|you (told|said|mentioned|recommended|suggested)|did i (tell|mention|say))\b/i
 
 export default defineAgent({
   prewarm: async () => {
@@ -97,7 +96,7 @@ export default defineAgent({
     let turnRecalled = false
     let toolQueue: Promise<void> = Promise.resolve()
     const modelCalls = () => parseToolCalls(stripToolResponses(model.functionText))
-    const callOpen = () => /<TOOLCALL>(?![\s\S]*<\/TOOLCALL>)/.test(model.functionText)
+    const callOpen = () => isOpen(model.functionText, '<TOOLCALL>', '</TOOLCALL>')
 
     model.onFunction = () => {
       const calls = modelCalls()
@@ -152,7 +151,7 @@ export default defineAgent({
     let routeTimer: NodeJS.Timeout | undefined
 
     async function routeTurn() {
-      const heard = userText.replace(/^[\s,.?!;:-]+/, '')
+      const heard = trimStartChars(userText, ' \n,.?!;:-')
       if (!heard || routedTurn === userFrom) return
       routedTurn = userFrom
       holdAudio()
@@ -166,14 +165,14 @@ export default defineAgent({
         }),
       ])
       if (!found.text) return releaseAudio(true)
-      const firstPerson = FIRST_PERSON.test(heard)
-      const refersBack = REFERS_BACK.test(heard)
-      const memoryTurn = laya === 'past' || refersBack || (firstPerson && found.top >= STRONG_MATCH)
+      const firstPerson = isFirstPerson(heard)
+      const backReference = refersBack(heard)
+      const memoryTurn = laya === 'past' || backReference || (firstPerson && found.top >= STRONG_MATCH)
       console.log(
         `route "${heard}": laya ${laya}, best match ${found.top.toFixed(1)} → ${memoryTurn ? 'memory' : 'no memory'} (${Date.now() - t}ms)`,
       )
       reporter.memory({ route: laya, text: memoryTurn ? found.text : undefined, ms: Date.now() - t })
-      const worthForcing = memoryTurn && (found.hits > 0 || firstPerson || refersBack)
+      const worthForcing = memoryTurn && (found.hits > 0 || firstPerson || backReference)
       if (!worthForcing || modelCalls().length > callsBefore || callOpen()) return releaseAudio(true)
       handledCalls++
       turnCalls++
@@ -221,9 +220,7 @@ export default defineAgent({
         userText = ''
       }
       if (reply() && now - lastAgentAt > TURN_QUIET_MS && now - lastUserAt > TURN_QUIET_MS) {
-        const text = reply()
-          .replace(/<[^>]+>/g, '')
-          .trim()
+        const text = removeTags(reply()).trim()
         if (text) reporter.agentSaid(text, lastAgentAt, { fromMemory: answeringFromMemory })
         agentFrom = model.assistantText.length
         answeringFromMemory = false

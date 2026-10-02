@@ -15,6 +15,7 @@ import type { AudioFrame } from '@livekit/rtc-node'
 import { env } from '@voice/config'
 import { warmReranker } from '@voice/memory'
 import { connectTemporal, type RoomRef } from '@voice/temporal'
+import { removeBetween } from '@voice/text'
 import { RoomReporter, reportSession } from '../reporting.js'
 import { createActions } from '../tools/actions.js'
 import { ActionAuditor } from '../tools/audit.js'
@@ -25,11 +26,7 @@ import { TurnAudio } from './turn-audio.js'
 
 const LOCAL_API_KEY = 'local'
 
-const clean = (text: string) =>
-  text
-    .replace(/\s*<audio:[0-9a-f]+>/g, '')
-    .replace(/\s*<memory>[\s\S]*?<\/memory>/g, '')
-    .trim()
+const clean = (text: string) => removeBetween(removeBetween(text, '<audio:', '>'), '<memory>', '</memory>').trim()
 
 process.env.LLM_BASE_URL = env('OMNI_BASE_URL')
 process.env.LLM_MODEL = env('OMNI_MODEL')

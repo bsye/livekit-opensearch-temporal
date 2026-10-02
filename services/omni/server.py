@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import threading
 import time
 import uuid
@@ -21,9 +20,29 @@ MODEL = os.environ.get("OMNI_MODEL", "mlx-community/Qwen3-Omni-30B-A3B-Instruct-
 PORT = int(os.environ.get("OMNI_PORT", "8300"))
 MAX_TURNS = 32
 TRANSCRIPT_WITH_AUDIO = os.environ.get("OMNI_TRANSCRIPT_WITH_AUDIO", "0").lower() in ("1", "true", "yes")
-AUDIO_MARKER = re.compile(r"<audio:([0-9a-f]+)>")
-MEMORY = re.compile(r"<memory>(.*?)</memory>", re.S)
-TOOL_CALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
+
+def between(text: str, open_: str, close: str) -> list[str]:
+    found, at = [], text.find(open_)
+    while at != -1:
+        end = text.find(close, at + len(open_))
+        if end == -1:
+            break
+        found.append(text[at + len(open_) : end])
+        at = text.find(open_, end + len(close))
+    return found
+
+
+def remove_between(text: str, open_: str, close: str) -> str:
+    out, start, at = "", 0, text.find(open_)
+    while at != -1:
+        end = text.find(close, at + len(open_))
+        if end == -1:
+            break
+        out += text[start:at]
+        start = end + len(close)
+        at = text.find(open_, start)
+    return out + text[start:]
+
 
 model, processor = load(MODEL)
 if hasattr(model, "disable_talker"):
@@ -76,15 +95,15 @@ def to_conversation(messages: list[dict], transcript_with_audio: bool = False) -
     heard = None
     last = messages[-1] if messages else None
     if last and last["role"] == "user":
-        m = AUDIO_MARKER.search(text_of(last.get("content")))
-        if m and m.group(1) in turns:
-            heard = (len(messages) - 1, m.group(1))
+        markers = between(text_of(last.get("content")), "<audio:", ">")
+        if markers and markers[0] in turns:
+            heard = (len(messages) - 1, markers[0])
     conversation, audios = [], []
     for i, msg in enumerate(messages):
         role = msg["role"]
-        raw = AUDIO_MARKER.sub("", text_of(msg.get("content")))
-        memory = MEMORY.findall(raw) if i == len(messages) - 1 or (heard and i == heard[0]) else []
-        text = MEMORY.sub("", raw).strip()
+        raw = remove_between(text_of(msg.get("content")), "<audio:", ">")
+        memory = between(raw, "<memory>", "</memory>") if i == len(messages) - 1 or (heard and i == heard[0]) else []
+        text = remove_between(raw, "<memory>", "</memory>").strip()
         if heard and i == heard[0]:
             parts = [{"type": "audio", "audio": heard[1]}]
             if transcript_with_audio and text:
@@ -175,7 +194,7 @@ def generate(body: dict, emit, cancel: threading.Event | None = None) -> dict:
 
 def tool_calls_in(text: str) -> list[dict]:
     calls = []
-    for i, raw in enumerate(TOOL_CALL.findall(text)):
+    for i, raw in enumerate(call.strip() for call in between(text, "<tool_call>", "</tool_call>")):
         try:
             c = json.loads(raw)
         except json.JSONDecodeError:
@@ -232,7 +251,7 @@ async def chat(request: Request):
         usage = await loop.run_in_executor(gpu, generate, body, parts.append)
         text = "".join(parts)
         calls = tool_calls_in(text)
-        message = {"role": "assistant", "content": TOOL_CALL.sub("", text).strip() or None}
+        message = {"role": "assistant", "content": remove_between(text, "<tool_call>", "</tool_call>").strip() or None}
         if calls:
             message["tool_calls"] = [{k: v for k, v in c.items() if k != "index"} for c in calls]
         return JSONResponse({"id": rid, "object": "chat.completion", "created": created, "model": MODEL,

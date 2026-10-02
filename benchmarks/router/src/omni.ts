@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { exampleMessages, instructions } from '@voice/agent/omni-prompt'
 import { toolSpecs } from '@voice/agent/tool-specs'
 import { dataPath, env } from '@voice/config'
+import { fileStamp } from '@voice/text'
 import { speak } from './speech.js'
 import { type Label, routerTurns, type Turn } from './turns.js'
 
@@ -106,7 +107,7 @@ const byLabel = (label: Label) =>
 const turns = [...byLabel('past'), ...byLabel('action'), ...byLabel('chat')]
 const outDir = dataPath('benchmarks', 'router')
 mkdirSync(outDir, { recursive: true })
-const log = `${outDir}/omni-${PROMPT}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.jsonl`
+const log = `${outDir}/omni-${PROMPT}-${fileStamp()}.jsonl`
 console.log(`${turns.length} turns × ${MODES.join(', ')}, prompt ${PROMPT} → ${log}`)
 
 const rows: Row[] = []

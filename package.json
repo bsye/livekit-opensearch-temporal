@@ -17,6 +17,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
+    "@inquirer/prompts": "^8.7.2",
     "@types/node": "^20.19.43",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

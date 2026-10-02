@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts whatever isn't running yet and opens a meeting the agent joins.
 #   npm start [-- room [identity]]          defaults: meet-<HHMMSS>, $USER
-#   AGENT=s2s|omni npm start                 another agent instead of the STT → LLM → TTS cascade
+#   AGENT=cascade|s2s|omni npm start         skip the agent menu (no menu outside a terminal: cascade)
 #   NO_OPEN=1 npm start                      print the link instead of opening the browser
 # Native processes run detached, logs in .run/. Stop with `npm stop`.
 set -euo pipefail
@@ -11,8 +11,6 @@ cd "$ROOT"
 
 ROOM="${1:-meet-$(date +%H%M%S)}"
 IDENTITY="${2:-$USER}"
-AGENT="${AGENT:-cascade}"
-agent_entry "$AGENT" >/dev/null || die "AGENT must be one of: $AGENTS"
 
 step "Checking prerequisites"
 [ -f .env ] && [ -d node_modules ] || die "run \`npm run setup\` first"
@@ -20,6 +18,11 @@ docker info >/dev/null 2>&1 || die "Docker (OrbStack) is not running"
 command -v lk >/dev/null || die "LiveKit CLI missing: run \`npm run setup\`"
 load_env
 echo "  ok"
+
+if [ -z "${AGENT:-}" ]; then
+  if interactive; then AGENT=$(choose agent) || exit 130; else AGENT=cascade; fi
+fi
+agent_entry "$AGENT" >/dev/null || die "AGENT must be one of: $AGENTS"
 
 step "Infrastructure (docker compose)"
 docker compose up -d --quiet-pull 2>&1 | grep -vE 'Running|Started|Healthy|Waiting|Created' || true

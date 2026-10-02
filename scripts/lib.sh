@@ -17,6 +17,11 @@ agent_entry() {
   esac
 }
 
+interactive() { [ -t 0 ] && [ -t 2 ]; }
+
+# choose agent|models: arrow-key picker (scripts/choose.ts), prints the answer
+choose() { (cd "$ROOT" && node --import tsx scripts/choose.ts "$1"); }
+
 port_of() { local p="${1##*:}"; echo "${p%%/*}"; }
 
 # wait_for DESCRIPTION TIMEOUT_SECONDS COMMAND...

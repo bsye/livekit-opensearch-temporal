@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup on an Apple Silicon Mac; safe to re-run.
-#   npm run setup [-- --s2s] [-- --omni]   also fetch the (large) models of the other agents
+#   npm run setup                    asks which agents to fetch models for (cascade always)
+#   npm run setup -- --s2s --omni    same, without asking
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -8,10 +9,11 @@ cd "$ROOT"
 
 WITH_S2S=0
 WITH_OMNI=0
+ASKED=0
 for arg in "$@"; do
   case "$arg" in
-    --s2s) WITH_S2S=1 ;;
-    --omni) WITH_OMNI=1 ;;
+    --s2s) WITH_S2S=1; ASKED=1 ;;
+    --omni) WITH_OMNI=1; ASKED=1 ;;
     *) die "unknown option $arg" ;;
   esac
 done
@@ -50,6 +52,12 @@ echo "  ok"
 step "Node packages"
 npm install --no-audit --no-fund
 
+if [ "$ASKED" = 0 ] && interactive; then
+  extra=$(choose models) || exit 130
+  case " $extra " in *" s2s "*) WITH_S2S=1 ;; esac
+  case " $extra " in *" omni "*) WITH_OMNI=1 ;; esac
+fi
+
 step "Python sidecars (venvs + models)"
 prefetch() { # SERVICE REPO...
   local service=$1; shift
@@ -59,8 +67,8 @@ prefetch() { # SERVICE REPO...
 }
 prefetch laya "$LAYA_MODEL"
 prefetch mlx-audio "$STT_MODEL" "$TTS_MODEL"
-[ "$WITH_S2S" = 1 ] && prefetch voicechat "$VOICECHAT_MODEL"
-[ "$WITH_OMNI" = 1 ] && prefetch omni "$OMNI_MODEL"
+if [ "$WITH_S2S" = 1 ]; then prefetch voicechat "$VOICECHAT_MODEL"; fi
+if [ "$WITH_OMNI" = 1 ]; then prefetch omni "$OMNI_MODEL"; fi
 
 step "LLM ($LLM_MODEL)"
 "$LMS" ls 2>/dev/null | grep -q "${LLM_MODEL#*/}" || "$LMS" get "$LLM_MODEL" -y

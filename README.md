@@ -183,7 +183,7 @@ Requires an Apple Silicon Mac with [Homebrew](https://brew.sh); 64 GB of memory 
 
 ```sh
 npm run setup     # tools, Node/Python dependencies, models, .env, containers, local CA trust
-npm start         # opens a meeting in the browser; the agent joins it
+npm start         # pick an agent, then a meeting opens in the browser and the agent joins it
 npm stop          # native services (npm stop -- --all also stops containers and unloads the LLM)
 ```
 
@@ -193,9 +193,19 @@ venv, downloads the models and asks for your password once, to trust Caddy's loc
 needs `security.enterprise_roots.enabled=true`. Use headphones: on laptop speakers the agent hears
 itself.
 
-`npm start` launches whatever isn't running, waits until each piece is ready and prints the room's
-Temporal link. `AGENT=s2s npm start` runs the speech-to-speech agent instead (`npm run setup -- --s2s`
-fetches its model first). Logs are in `.run/`.
+Setup asks which agents to fetch models for (multi-select; the cascade is always installed), and
+`npm start` asks which agent to run:
+
+| agent | pipeline |
+|---|---|
+| `cascade` (default) | Parakeet STT → Gemma 4 26B-A4B (LM Studio) → Kokoro TTS |
+| `s2s` | NVIDIA NemotronLabs VoiceChat 11B, full-duplex speech-to-speech |
+| `omni` | Qwen3-Omni 30B-A3B hears the audio and answers in text, Kokoro speaks (~24 GB) |
+
+Skip the menus with `AGENT=omni npm start` and `npm run setup -- --s2s --omni`; outside a terminal
+the cascade is used. Only one agent runs at a time: starting one stops the others. `npm start`
+launches whatever isn't running, waits until each piece is ready and prints the room's Temporal
+link. Logs are in `.run/`.
 
 | service | address |
 |---|---|

@@ -20,7 +20,10 @@ const BATCH = 16;
 export class Reranker {
   private loaded?: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }>;
 
-  constructor(private name: RerankerName) {}
+  constructor(
+    private name: RerankerName,
+    private maxLength = 512,
+  ) {}
 
   load() {
     this.loaded ??= (async () => {
@@ -49,7 +52,7 @@ export class Reranker {
         text_pair: idx.map((i) => passages[i]),
         padding: true,
         truncation: true,
-        max_length: 512,
+        max_length: this.maxLength,
       });
       const { logits } = (await model(inputs)) as { logits: Tensor };
       const data = logits.data as Float32Array;
@@ -59,7 +62,8 @@ export class Reranker {
   }
 }
 
-const minilm = new Reranker('minilm');
+// 256 tokens: same LongMemEval accuracy as 512 (top-1 0.652, recall_any@5 0.862), cheaper on long messages
+const minilm = new Reranker('minilm', 256);
 
 export const rerankScores = (question: string, passages: string[]) => minilm.score(question, passages);
 

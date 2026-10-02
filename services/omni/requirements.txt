@@ -1,0 +1,4 @@
+mlx-vlm==0.7.4
+mlx-audio==0.5.7
+fastapi
+uvicorn

@@ -3,6 +3,7 @@ import {
   cli,
   defineAgent,
   inference,
+  llm,
   ServerOptions,
   voice,
   type JobContext,
@@ -10,6 +11,7 @@ import {
 } from '@livekit/agents';
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
+import type { AudioFrame } from '@livekit/rtc-node';
 import { env } from '@voice/config';
 import { warmReranker } from '@voice/memory';
 import { connectTemporal, type RoomRef } from '@voice/temporal';
@@ -18,30 +20,56 @@ import { createActions } from '../tools/actions.js';
 import { ActionAuditor } from '../tools/audit.js';
 import { createTools } from '../tools/index.js';
 import { RecallPrefetch } from '../tools/prefetch.js';
-import { stripControlTokens } from './llm-filter.js';
+import { exampleChatCtx, instructions } from './prompt.js';
+import { TurnAudio } from './turn-audio.js';
 
-const instructions = (now: Date) => `You are a helpful voice assistant running fully on local models.
-Keep replies short and conversational: one or two sentences, no markdown, lists or emoji.
-Use tools only when the user asks for that action. After a tool runs, tell the user what it did.
-Whenever the user asks about their own life, past, plans, purchases, people they know, or anything they
-told you before, call recall first, every time, even if you searched earlier in this conversation.
-Never say you have no information about the user's past without calling recall.
-If the user corrects a reminder or says undo, cancel it (and set the corrected one).
-The current local time is ${now.toTimeString().slice(0, 5)}, ${now.toDateString()}.`;
 
 const LOCAL_API_KEY = 'local'; // the OpenAI client requires one; local servers ignore it
 
-// Turn-taking. VAD reports end of speech after VAD_SILENCE_MS; the audio turn detector then decides
-// from intonation whether the user is done or pausing. Silence alone either split sentences at
-// natural pauses or, tuned longer, slowed every reply.
+/** A user message without the markers this agent adds to it. */
+const clean = (text: string) => text.replace(/\s*<audio:[0-9a-f]+>/g, '').replace(/\s*<memory>[\s\S]*?<\/memory>/g, '').trim();
+
+// Memory query expansion (preference questions) uses the same model: no second LLM loaded
+process.env.LLM_BASE_URL = env('OMNI_BASE_URL');
+process.env.LLM_MODEL = env('OMNI_MODEL');
+
+// Turn-taking as in the cascade (see cascade/agent.ts)
 const VAD_SILENCE_MS = 300;
 const ENDPOINTING_MIN_DELAY_MS = 300;
 const ENDPOINTING_MAX_DELAY_MS = 2500;
-// Only real speech interrupts the agent, not "okay" or a blip of echo.
 const INTERRUPTION_MIN_MS = 600;
 const INTERRUPTION_MIN_WORDS = 2;
 
-/** STT → LLM → TTS, all on local models. */
+/**
+ * Hybrid: Qwen3-Omni (services/omni) hears each user turn as audio and answers in text with tool
+ * calls, including when to search memory (recall); Kokoro speaks it. Parakeet still transcribes every turn: LiveKit's turn detector, the chat
+ * history, Temporal and memory work on text. The audio rides along as an <audio:id> marker in the
+ * user message, which the sidecar swaps for the recording (OpenAI's chat format has no audio input
+ * in agents-js).
+ */
+class OmniAgent extends voice.Agent {
+  constructor(
+    opts: ConstructorParameters<typeof voice.Agent>[0],
+    private readonly turnAudio: TurnAudio,
+  ) {
+    super(opts);
+  }
+
+  // record the user's audio on its way to speech-to-text
+  async sttNode(audio: ReadableStream<AudioFrame> | AsyncIterable<AudioFrame>, settings: voice.ModelSettings) {
+    return voice.Agent.default.sttNode(this, this.turnAudio.tap(audio), settings);
+  }
+
+  // the turn is final: hand its audio to the model (whether to search memory is the model's call)
+  async onUserTurnCompleted(_chatCtx: llm.ChatContext, newMessage: llm.ChatMessage) {
+    const id = await this.turnAudio.upload().catch((err) => {
+      console.error('turn audio upload failed; the model reads the transcript instead', err);
+      return undefined;
+    });
+    if (id) newMessage.content.push(` <audio:${id}>`);
+  }
+}
+
 export default defineAgent({
   prewarm: async (proc: JobProcess) => {
     proc.userData.vad = await silero.VAD.load({ minSilenceDuration: VAD_SILENCE_MS });
@@ -50,6 +78,7 @@ export default defineAgent({
 
   entry: async (ctx: JobContext) => {
     const temporal = await connectTemporal();
+    const turnAudio = new TurnAudio(env('OMNI_BASE_URL'));
 
     const session = new voice.AgentSession({
       vad: ctx.proc.userData.vad as silero.VAD,
@@ -60,12 +89,7 @@ export default defineAgent({
         language: 'en',
         useRealtime: false,
       }),
-      llm: new openai.LLM({
-        baseURL: env('LLM_BASE_URL'),
-        apiKey: LOCAL_API_KEY,
-        model: env('LLM_MODEL'),
-        reasoningEffort: 'none', // thinking adds seconds per turn
-      }),
+      llm: new openai.LLM({ baseURL: env('OMNI_BASE_URL'), apiKey: LOCAL_API_KEY, model: env('OMNI_MODEL'), temperature: 0 }),
       tts: new openai.TTS({
         baseURL: env('SPEECH_BASE_URL'),
         apiKey: LOCAL_API_KEY,
@@ -73,12 +97,11 @@ export default defineAgent({
         voice: env('TTS_VOICE') as openai.TTSVoices,
       }),
       turnHandling: {
-        // dev mode defaults to v1, which only runs on LiveKit Cloud
         turnDetection: new inference.TurnDetector({ version: 'v1-mini' }),
         endpointing: { minDelay: ENDPOINTING_MIN_DELAY_MS, maxDelay: ENDPOINTING_MAX_DELAY_MS },
         interruption: { mode: 'vad', minDuration: INTERRUPTION_MIN_MS, minWords: INTERRUPTION_MIN_WORDS },
-        // the LLM starts on the final transcript, but TTS waits for the confirmed turn, or discarded drafts get spoken
-        preemptiveGeneration: { enabled: true, preemptiveTts: false },
+        // off: the audio is attached when the turn completes, which would discard every early draft
+        preemptiveGeneration: { enabled: false },
       },
     });
 
@@ -87,7 +110,6 @@ export default defineAgent({
     const reporter = new RoomReporter(temporal, () => room, () => agentIdentity);
 
     const userTurns: string[] = [];
-    // transcripts can arrive after the user left, when the room no longer lists them
     let lastUser = 'user';
     const currentUser = () => (lastUser = ctx.room.remoteParticipants.values().next().value?.identity ?? lastUser);
     let answeringFromMemory = false;
@@ -104,18 +126,9 @@ export default defineAgent({
       prefetch,
     });
 
+    const agent = new OmniAgent({ instructions: instructions(new Date()), tools, chatCtx: exampleChatCtx() }, turnAudio);
     prefetch.attach(session);
-    await session.start({
-      agent: voice.Agent.create({
-        instructions: instructions(new Date()),
-        tools,
-        llmNode: async (agentCtx, chatCtx, toolCtx, settings) => {
-          const stream = await voice.Agent.default.llmNode(agentCtx.agent, chatCtx, toolCtx, settings);
-          return stream ? stripControlTokens(stream) : null;
-        },
-      }),
-      room: ctx.room,
-    });
+    await session.start({ agent, room: ctx.room });
     await ctx.connect();
 
     room = { sid: await ctx.room.getSid(), name: ctx.room.name ?? '' };
@@ -124,6 +137,7 @@ export default defineAgent({
     reportSession(session, reporter, {
       user: currentUser,
       vadSilenceMs: VAD_SILENCE_MS,
+      clean,
       onUserText: (text) => userTurns.push(text),
       takeFromMemory: () => {
         const was = answeringFromMemory;
@@ -131,8 +145,12 @@ export default defineAgent({
         return was;
       },
     });
+    session.on(voice.AgentSessionEventTypes.UserStateChanged, ({ newState, createdAt }) => {
+      if (newState === 'speaking') turnAudio.speechStarted(createdAt);
+    });
 
-    session.generateReply({ instructions: 'Greet the user in one short sentence.' });
+    // fixed, not generated: the model would continue from the seeded examples instead of greeting
+    session.say('Hi! How can I help you today?');
   },
 });
 

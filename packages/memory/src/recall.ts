@@ -92,7 +92,9 @@ async function isPreferenceQuestion(question: string): Promise<boolean> {
   return (answers.q.noul ?? 0) >= 0.5;
 }
 
-export const NOTHING_FOUND = 'Nothing found about that in past conversations.';
+// says *earlier* conversations: the current one is in the model's chat history, and a bare "nothing
+// found" made it deny what the user had said a minute before
+export const NOTHING_FOUND = 'Nothing found about that in earlier conversations (this conversation is above).';
 
 /**
  * For the speech-to-speech model, which reads a tool result one token per 80 ms frame: the few
@@ -106,7 +108,9 @@ export async function recallBrief(q: RecallQuery, sentences = 3): Promise<{ text
   const candidates = hits.flatMap(({ doc }) =>
     doc.userText
       .split(/(?<=[.!?])\s+|\n+/)
-      .filter((s) => s.trim().length > 12)
+      // statements only: a question isn't evidence ("What is Rachel's specialty?" asked in an earlier
+      // call came back as the answer to the same question)
+      .filter((s) => s.trim().length > 12 && !s.trim().endsWith('?'))
       .map((s) => ({ s: s.trim().slice(0, 200), at: doc.endedAt })),
   );
   if (!candidates.length) return nothing;
